@@ -1,0 +1,57 @@
+/*
+ * Copyright (c) 2026 RT-Thread
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Titan Board Mini - CM33 Board DTS
+ */
+
+/dts-v1/;
+
+#include <renesas/ra/ra8/r7ka8p1kflcac_cm33.dtsi>
+#include "titan_board_mini.dtsi"
+
+/ {
+	model = "RT-Thread Titan Board Mini";
+	compatible = "renesas,ra8p1", "renesas,ra8";
+
+	chosen {
+		zephyr,sram = &sram1;
+		zephyr,flash = &code_mram_cm33;
+		zephyr,flash-controller = &mram_ctrl;
+		zephyr,code-partition = &slot0_partition;
+		zephyr,entropy = &trng;
+	};
+};
+
+&code_mram_cm33 {
+	partitions {
+		ranges;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		slot0_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0";
+			reg = <0x0 DT_SIZE_K(256)>;
+		};
+	};
+};
+
+/* ULPT timers for CM33 */
+&ulpt0 {
+	interrupts = <59 1>;
+	interrupt-names = "ulpti";
+	status = "okay";
+
+	timer {
+		status = "okay";
+	};
+};
+
+&ulpt1 {
+	status = "okay";
+
+	timer {
+		status = "okay";
+	};
+};

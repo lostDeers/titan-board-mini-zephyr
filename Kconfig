@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: Apache-2.0
+
+menu "W25Q64 BSP"
+
+	rsource "src/drivers/Kconfig"
+
+endmenu

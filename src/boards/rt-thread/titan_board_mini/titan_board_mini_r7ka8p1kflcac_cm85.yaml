@@ -1,0 +1,21 @@
+identifier: titan_board_mini/r7ka8p1kflcac/cm85
+name: Titan Board Mini
+type: mcu
+arch: arm
+ram: 1664
+flash: 1024
+toolchain:
+  - zephyr
+  - gnuarmemb
+supported:
+  - gpio
+  - uart
+  - i2c
+  - spi
+  - sdhc
+  - netif:eth
+  - usb_device
+  - rtc
+  - watchdog
+  - hwinfo
+vendor: rt-thread

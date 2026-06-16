@@ -1,0 +1,21 @@
+# SPDX-License-Identifier: Apache-2.0
+
+menu "W25Q64 flash drivers"
+
+config TITAN_W25Q64_RA_OSPI_B
+	bool "Titan Board Mini W25Q64 over RA OSPI_B"
+	default y
+	depends on FLASH
+	depends on DT_HAS_TITAN_W25Q64_RA_OSPI_B_ENABLED
+	select FLASH_HAS_DRIVER_ENABLED
+	select FLASH_HAS_PAGE_LAYOUT
+	select FLASH_HAS_EXPLICIT_ERASE
+	select FLASH_JESD216
+	select FLASH_HAS_EX_OP
+	select PINCTRL
+	select USE_RA_FSP_OSPI_B_NOR_FLASH
+	help
+	  Enable the conservative first-version W25Q64 driver for the Titan Board
+	  Mini onboard 8 MiB SPI NOR flash wired to RA8P1 OSPI_B CS1.
+
+endmenu

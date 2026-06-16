@@ -1,0 +1,247 @@
+/*
+ * Copyright (c) 2026 RT-Thread
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Titan Board Mini - CM85 Board DTS
+ */
+
+/dts-v1/;
+
+#include <renesas/ra/ra8/r7ka8p1kflcac_cm85.dtsi>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include "titan_board_mini.dtsi"
+
+/ {
+	model = "RT-Thread Titan Board Mini";
+	compatible = "renesas,ra8p1", "renesas,ra8";
+
+	chosen {
+		zephyr,sram = &sram0;
+		zephyr,flash = &code_mram_cm85;
+		zephyr,flash-controller = &mram_ctrl;
+		zephyr,code-partition = &slot0_partition;
+		zephyr,console = &uart8;
+		zephyr,shell-uart = &uart8;
+		zephyr,entropy = &trng;
+	};
+};
+
+/* === Console UART (SCI8) — J-Link VCOM === */
+&sci8 {
+	pinctrl-0 = <&sci8_default>;
+	pinctrl-names = "default";
+	interrupts = <0 12>, <1 12>, <2 12>, <3 12>;
+	interrupt-names = "rxi", "txi", "tei", "eri";
+	status = "okay";
+
+	uart8: uart {
+		current-speed = <115200>;
+		status = "okay";
+	};
+};
+
+/* === System I2C (IIC1): EEPROM, sensors === */
+&iic1 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clock-frequency = <I2C_BITRATE_FAST_PLUS>;
+	pinctrl-0 = <&iic1_default>;
+	pinctrl-names = "default";
+	interrupts = <16 12>, <17 12>, <18 12>, <19 12>;
+	interrupt-names = "rxi", "txi", "tei", "eri";
+	status = "okay";
+};
+
+/* === I2C0: IMU (P0.13=SCL, P1.09=SDA) === */
+&iic0 {
+	#address-cells = <1>;
+	#size-cells = <0>;
+	clock-frequency = <I2C_BITRATE_STANDARD>;
+	pinctrl-0 = <&iic0_default>;
+	pinctrl-names = "default";
+	interrupts = <12 12>, <13 12>, <14 12>, <15 12>;
+	interrupt-names = "rxi", "txi", "tei", "eri";
+	status = "okay";
+};
+
+/* === SPI1: 40pin header, CE0=P1.05 GPIO chip-select === */
+&spi1 {
+	cs-gpios = <&ioport1 5 GPIO_ACTIVE_LOW>;
+	pinctrl-0 = <&spi1_default>;
+	pinctrl-names = "default";
+	interrupts = <8 12>, <9 12>, <10 12>, <11 12>;
+	interrupt-names = "rxi", "txi", "tei", "eri";
+	status = "okay";
+};
+
+/* === OSPI_B CS1: onboard Winbond W25Q64 8 MiB SPI NOR === */
+&octaspiclk {
+	clocks = <&pllq>;
+	div = <10>;
+	status = "okay";
+};
+
+&{/soc} {
+	ospi0: ospi@40268000 {
+		compatible = "renesas,ra-ospi-b";
+		reg = <0x40268000 0x19c>;
+		#address-cells = <1>;
+		#size-cells = <1>;
+		clocks = <&octaspiclk MSTPB 16>;
+		pinctrl-0 = <&ospi0_w25q64_default>;
+		pinctrl-names = "default";
+		status = "okay";
+
+		w25q64: flash@90000000 {
+			compatible = "titan,w25q64-ra-ospi-b";
+			reg = <0x90000000 DT_SIZE_M(8)>;
+			jedec-id = [ef 40 17];
+			spi-max-frequency = <DT_FREQ_M(40)>;
+			page-size = <256>;
+			erase-block-size = <4096>;
+			write-block-size = <1>;
+			status = "okay";
+		};
+	};
+};
+
+/* === RTC === */
+&rtc {
+	interrupts = <35 12>, <36 12>, <37 12>;
+	interrupt-names = "cup", "prd", "alm";
+	status = "okay";
+};
+
+/* === Watchdog === */
+&wdt0 {
+	status = "okay";
+};
+
+/* === SDHI0: MicroSD Card === */
+&sdhc0 {
+	pinctrl-0 = <&sdhc0_default>;
+	pinctrl-names = "default";
+	interrupts = <32 4>, <33 4>, <34 4>;
+	interrupt-names = "accs", "card", "dma_req";
+	bus-width = <4>;
+	card-detect;
+	status = "okay";
+};
+
+/* === I2S0: Audio DAC (ES8156) === */
+&i2s0 {
+	pinctrl-0 = <&i2s0_default>;
+	pinctrl-names = "default";
+	interrupts = <20 12>;
+	interrupt-names = "ssi_txi";
+	status = "okay";
+};
+
+/* === Ethernet (RTL8211F PHY on RGMII) === */
+&eth1 {
+	phy-connection-type = "rgmii";
+	local-mac-address = [74 90 50 01 02 03];
+	phy-clock-type = "xtal";
+	phy-handle = <&phy0>;
+	pinctrl-0 = <&eth1_default>;
+	pinctrl-names = "default";
+	status = "okay";
+};
+
+&mdio1 {
+	pinctrl-0 = <&mdio1_default>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	phy0: phy@0 {
+		compatible = "realtek,rtl8211f";
+		reg = <0>;
+		reset-gpios = <&ioport5 14 GPIO_ACTIVE_LOW>;
+		int-gpios = <&ioport1 7 GPIO_ACTIVE_LOW>;
+		status = "okay";
+	};
+};
+
+/* === USBHS (Device/Host) === */
+&usbhs {
+	interrupts = <23 12>;
+	interrupt-names = "usbhs-ir";
+	status = "okay";
+
+	zephyr_udc0: udc {
+		status = "okay";
+	};
+};
+
+/* === DRW (2D Drawing Engine, for LVGL acceleration) === */
+&drw {
+	interrupt-names = "drw";
+	interrupts = <31 12>;
+	status = "okay";
+};
+
+/* === Flash Partitions === */
+&code_mram_cm85 {
+	partitions {
+		ranges;
+		#address-cells = <1>;
+		#size-cells = <1>;
+
+		boot_partition: partition@0 {
+			compatible = "zephyr,mapped-partition";
+			label = "mcuboot";
+			reg = <0x0 DT_SIZE_K(64)>;
+		};
+
+		slot0_partition: partition@10000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-0";
+			reg = <0x10000 DT_SIZE_K(344)>;
+		};
+
+		slot1_partition: partition@66000 {
+			compatible = "zephyr,mapped-partition";
+			label = "image-1";
+			reg = <0x66000 DT_SIZE_K(344)>;
+		};
+
+		storage_partition: partition@bc000 {
+			compatible = "zephyr,mapped-partition";
+			label = "storage";
+			reg = <0xbc000 DT_SIZE_K(16)>;
+		};
+	};
+};
+
+/* === ULPT timers (low power) === */
+&ulpt0 {
+	interrupts = <19 1>;
+	interrupt-names = "ulpti";
+	status = "okay";
+
+	timer {
+		status = "okay";
+	};
+};
+
+&ulpt1 {
+	status = "okay";
+
+	timer {
+		status = "okay";
+	};
+};
+
+/* === Ethernet Switch Manager === */
+&eswm {
+	interrupts = <24 1>;
+	interrupt-names = "gwdi";
+	status = "okay";
+};
+
+/* === Ethos-U55 NPU === */
+&npu0 {
+	interrupts = <95 1>;
+	interrupt-names = "npu-irq";
+	status = "okay";
+};

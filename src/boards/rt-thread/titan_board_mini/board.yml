@@ -1,0 +1,6 @@
+board:
+  name: titan_board_mini
+  full_name: Titan Board Mini
+  vendor: rt-thread
+  socs:
+  - name: r7ka8p1kflcac

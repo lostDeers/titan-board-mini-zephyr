@@ -1,0 +1,40 @@
+# Copyright (c) 2026 RT-Thread
+# SPDX-License-Identifier: Apache-2.0
+
+description: Winbond W25Q64 SPI NOR flash on Titan Board Mini RA OSPI_B CS1
+
+compatible: "titan,w25q64-ra-ospi-b"
+
+include: [flash-controller.yaml]
+
+on-bus: ospi
+
+properties:
+  reg:
+    required: true
+    description: Memory-mapped base address and flash size in bytes.
+
+  jedec-id:
+    type: uint8-array
+    required: true
+    description: Expected three-byte JEDEC ID. W25Q64JV is ef 40 17.
+
+  spi-max-frequency:
+    type: int
+    required: true
+    description: Maximum allowed OSPI_B clock frequency in Hz for conservative 1S-1S-1S mode.
+
+  page-size:
+    type: int
+    required: true
+    description: Page program size in bytes. W25Q64 uses 256-byte pages.
+
+  erase-block-size:
+    type: int
+    required: true
+    description: Erase granularity exposed by this driver. First version supports 4 KiB sectors.
+
+  write-block-size:
+    type: int
+    required: true
+    description: Minimum write alignment exposed through flash_parameters.
