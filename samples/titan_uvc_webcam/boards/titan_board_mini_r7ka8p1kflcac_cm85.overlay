@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
 / {
 	chosen {
 		zephyr,camera = &video_sw_generator;
@@ -19,5 +21,17 @@
 	 */
 	video_sw_generator: video-sw-generator {
 		compatible = "zephyr,video-sw-generator";
+	};
+};
+
+&ioport4 {
+	/*
+	 * The Type-C device connector shares D+/D- through TS3USB221A. USB_CH_SEL
+	 * on P4.13 selects the USBHS pair used by zephyr_udc0.
+	 */
+	usb_hs_mux_select: usb-hs-mux-select {
+		gpio-hog;
+		gpios = <13 GPIO_ACTIVE_HIGH>;
+		output-high;
 	};
 };
