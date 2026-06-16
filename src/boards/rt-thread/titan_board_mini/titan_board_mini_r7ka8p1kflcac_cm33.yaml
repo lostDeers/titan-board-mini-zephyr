@@ -1,0 +1,12 @@
+identifier: titan_board_mini/r7ka8p1kflcac/cm33
+name: Titan Board Mini
+type: mcu
+arch: arm
+ram: 640
+flash: 256
+toolchain:
+  - zephyr
+  - gnuarmemb
+supported:
+  - gpio
+vendor: rt-thread

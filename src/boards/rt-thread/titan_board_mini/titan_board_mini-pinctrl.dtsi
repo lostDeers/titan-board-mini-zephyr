@@ -1,0 +1,245 @@
+/*
+ * Copyright (c) 2026 RT-Thread
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Titan Board Mini - Pinctrl
+ * Pin mux configuration for all onboard peripherals
+ */
+
+&pinctrl {
+	/* I2C0: P0.13(SCL) / P1.09(SDA) — IMU, onboard sensors */
+	iic0_default: iic0_default {
+		group1 {
+			psels = <RA_PSEL(RA_PSEL_I2C, 0, 13)>,
+				<RA_PSEL(RA_PSEL_I2C, 1, 9)>;
+			drive-strength = "medium";
+		};
+	};
+
+	/* Titan Mini dedicated camera IIC0/SCCB path from RT-Thread Mini MIPI-CSI BSP: P4.10(SCL) / P4.09(SDA). */
+	iic0_camera_default: iic0_camera_default {
+		group1 {
+			psels = <RA_PSEL(RA_PSEL_I2C, 4, 10)>,
+				<RA_PSEL(RA_PSEL_I2C, 4, 9)>;
+			drive-strength = "medium";
+		};
+	};
+
+	/* Console UART (SCI8): P1302(TX) / P1303(RX) — J-Link VCOM */
+	sci8_default: sci8_default {
+		group1 {
+			psels = <RA_PSEL(RA_PSEL_SCI_8, 13, 2)>;
+			drive-strength = "medium";
+		};
+		group2 {
+			psels = <RA_PSEL(RA_PSEL_SCI_8, 13, 3)>;
+		};
+	};
+
+	/* System I2C (IIC1): P511(SDA) / P512(SCL) */
+	iic1_default: iic1_default {
+		group1 {
+			psels = <RA_PSEL(RA_PSEL_I2C, 5, 11)>,
+				<RA_PSEL(RA_PSEL_I2C, 5, 12)>;
+			drive-strength = "medium";
+		};
+	};
+
+
+	/* SPI1: 40pin header MOSI=P7.08, MISO=P7.09, SCLK=P1.02; CS is GPIO. */
+	spi1_default: spi1_default {
+		group1 {
+			/* MOSIB: P708, MISOB: P709 */
+			psels = <RA_PSEL(RA_PSEL_SPI, 7, 8)>,
+				<RA_PSEL(RA_PSEL_SPI, 7, 9)>;
+			drive-strength = "high";
+		};
+		group2 {
+			/* RSPCKB: P102 */
+			psels = <RA_PSEL(RA_PSEL_SPI, 1, 2)>;
+			drive-strength = "highspeed-high";
+		};
+	};
+
+	/* RGB565 LCD: Titan Mini display FPC, enabled by display-specific overlays. */
+	lcdif_rgb565_default: lcdif_rgb565_default {
+		group1 {
+			/* D0-D15 plus TCON0/TCON1/TCON3. */
+			psels = <RA_PSEL(RA_PSEL_GLCDC, 9, 14)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 9, 15)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 9, 3)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 9, 2)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 9, 10)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 9, 11)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 9, 12)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 9, 13)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 9, 4)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 2, 7)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 11, 7)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 11, 6)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 11, 5)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 11, 1)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 11, 4)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 11, 3)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 8, 6)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 8, 5)>,
+				<RA_PSEL(RA_PSEL_GLCDC, 5, 13)>;
+			drive-strength = "high";
+		};
+		group2 {
+			/* Pixel clock. */
+			psels = <RA_PSEL(RA_PSEL_GLCDC, 5, 15)>;
+			drive-strength = "highspeed-high";
+		};
+	};
+
+	/* OV5640 camera XCLK: GPT11B on P5.00 for Mini MIPI-CSI connector. */
+	pwm11_camera_xclk_default: pwm11_camera_xclk_default {
+		group1 {
+			psels = <RA_PSEL(RA_PSEL_GPT1, 5, 0)>;
+			drive-strength = "medium";
+		};
+	};
+
+
+	/* I2S0 Audio: BCLK=P403, WCLK=P404, TX=P405 */
+	i2s0_default: i2s0_default {
+		group1 {
+			psels = <RA_PSEL(RA_PSEL_SSIE, 4, 3)>,
+				<RA_PSEL(RA_PSEL_SSIE, 4, 4)>,
+				<RA_PSEL(RA_PSEL_SSIE, 4, 5)>;
+		};
+	};
+
+	/* SDHI0: SD Card */
+	sdhc0_default: sdhc0_default {
+		group1 {
+			/* CLK: P907, CMD: P906, D0: P905, D1: P904, D2: P903, D3: P902 */
+			psels = <RA_PSEL(RA_PSEL_SDHI, 9, 7)>,
+				<RA_PSEL(RA_PSEL_SDHI, 9, 6)>,
+				<RA_PSEL(RA_PSEL_SDHI, 9, 5)>,
+				<RA_PSEL(RA_PSEL_SDHI, 9, 4)>,
+				<RA_PSEL(RA_PSEL_SDHI, 9, 3)>,
+				<RA_PSEL(RA_PSEL_SDHI, 9, 2)>;
+			drive-strength = "high";
+		};
+		group2 {
+			/* CD: P908 */
+			psels = <RA_PSEL(RA_PSEL_SDHI, 9, 8)>;
+		};
+	};
+
+	/* SDRAM (same as EK-RA8P1) */
+	sdram_default: sdram_default {
+		group1 {
+			psels = <RA_PSEL(RA_PSEL_BUS, 10, 3)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 2)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 1)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 0)>,
+				<RA_PSEL(RA_PSEL_BUS, 5, 3)>,
+				<RA_PSEL(RA_PSEL_BUS, 5, 4)>,
+				<RA_PSEL(RA_PSEL_BUS, 5, 5)>,
+				<RA_PSEL(RA_PSEL_BUS, 5, 6)>,
+				<RA_PSEL(RA_PSEL_BUS, 5, 7)>,
+				<RA_PSEL(RA_PSEL_BUS, 5, 8)>,
+				<RA_PSEL(RA_PSEL_BUS, 5, 9)>,
+				<RA_PSEL(RA_PSEL_BUS, 5, 10)>,
+				<RA_PSEL(RA_PSEL_BUS, 6, 8)>,
+				<RA_PSEL(RA_PSEL_BUS, 13, 0)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 15)>,
+				<RA_PSEL(RA_PSEL_BUS, 3, 2)>,
+				<RA_PSEL(RA_PSEL_BUS, 3, 1)>,
+				<RA_PSEL(RA_PSEL_BUS, 3, 0)>,
+				<RA_PSEL(RA_PSEL_BUS, 1, 12)>,
+				<RA_PSEL(RA_PSEL_BUS, 1, 13)>,
+				<RA_PSEL(RA_PSEL_BUS, 1, 14)>,
+				<RA_PSEL(RA_PSEL_BUS, 1, 15)>,
+				<RA_PSEL(RA_PSEL_BUS, 6, 9)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 11)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 12)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 13)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 14)>,
+				<RA_PSEL(RA_PSEL_BUS, 6, 10)>,
+				<RA_PSEL(RA_PSEL_BUS, 6, 11)>,
+				<RA_PSEL(RA_PSEL_BUS, 6, 12)>,
+				<RA_PSEL(RA_PSEL_BUS, 6, 13)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 14)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 13)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 12)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 11)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 10)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 9)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 8)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 7)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 6)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 5)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 4)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 3)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 2)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 1)>,
+				<RA_PSEL(RA_PSEL_BUS, 12, 0)>,
+				<RA_PSEL(RA_PSEL_BUS, 6, 7)>,
+				<RA_PSEL(RA_PSEL_BUS, 6, 14)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 5)>,
+				<RA_PSEL(RA_PSEL_BUS, 6, 15)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 4)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 8)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 9)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 10)>,
+				<RA_PSEL(RA_PSEL_BUS, 8, 13)>,
+				<RA_PSEL(RA_PSEL_BUS, 10, 6)>;
+			drive-strength = "high";
+		};
+		group2 {
+			psels = <RA_PSEL(RA_PSEL_BUS, 10, 15)>;
+			drive-strength = "highspeed-high";
+		};
+	};
+
+	/* Ethernet RGMII + MDIO */
+	mdio1_default: mdio1_default {
+		group1 {
+			/* MDC: P415, MDIO: P414 */
+			psels = <RA_PSEL(RA_PSEL_ETH_MII, 4, 15)>,
+				<RA_PSEL(RA_PSEL_ETH_MII, 4, 14)>;
+			drive-strength = "medium";
+		};
+	};
+
+	eth1_default: eth1_default {
+		group1 {
+			psels = <RA_PSEL(RA_PSEL_ETH_RGMII, 3, 7)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 3, 6)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 3, 5)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 3, 4)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 3, 10)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 3, 9)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 9, 6)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 9, 7)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 9, 8)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 9, 9)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 2, 6)>,
+				<RA_PSEL(RA_PSEL_ETH_RGMII, 9, 5)>;
+			drive-strength = "high";
+		};
+	};
+
+	/* USBHS */
+	usbhs_default: usbhs_default {
+		group1 {
+			/* VBUS: P408 */
+			psels = <RA_PSEL(RA_PSEL_USBHS, 4, 8)>;
+			drive-strength = "high";
+		};
+	};
+
+	usbfs_default: usbfs_default {
+		group1 {
+			/* DM: P815, DP: P814, VBUS: P407 */
+			psels = <RA_PSEL(RA_PSEL_USBFS, 8, 15)>,
+				<RA_PSEL(RA_PSEL_USBFS, 8, 14)>,
+				<RA_PSEL(RA_PSEL_USBFS, 4, 7)>;
+			drive-strength = "high";
+		};
+	};
+};
