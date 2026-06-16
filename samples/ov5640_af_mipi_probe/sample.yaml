@@ -1,0 +1,14 @@
+sample:
+  name: Titan Board Mini OV5640 AF MIPI probe
+  description: Probe the Titan Board Mini OV5640 sensor over SCCB/I2C with MIPI endpoint metadata.
+common:
+  platform_allow:
+    - titan_board_mini/r7ka8p1kflcac/cm85
+  integration_platforms:
+    - titan_board_mini/r7ka8p1kflcac/cm85
+tests:
+  sample.drivers.video.titan_board_mini_ov5640_af_mipi_probe:
+    tags:
+      - video
+      - camera
+    build_only: true

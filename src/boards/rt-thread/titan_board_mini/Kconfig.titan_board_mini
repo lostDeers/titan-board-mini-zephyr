@@ -4,3 +4,18 @@
 config BOARD_TITAN_BOARD_MINI
 	select SOC_R7KA8P1KFLCAC_CM85 if BOARD_TITAN_BOARD_MINI_R7KA8P1KFLCAC_CM85
 	select SOC_R7KA8P1KFLCAC_CM33 if BOARD_TITAN_BOARD_MINI_R7KA8P1KFLCAC_CM33
+
+config TITAN_BOARD_MINI_OV5640_XCLK
+	bool "Start OV5640 camera XCLK from GPT11B"
+	depends on VIDEO && PWM && CLOCK_CONTROL && CLOCK_CONTROL_PWM
+	help
+	  Start the Titan Board Mini OV5640 external clock before video sensor
+	  drivers initialize. The camera connector routes this clock through
+	  GPT11B on P5.00; the probe overlay selects the generated frequency.
+
+config TITAN_BOARD_MINI_OV5640_XCLK_INIT_PRIORITY
+	int "OV5640 camera XCLK init priority"
+	default 55
+	depends on TITAN_BOARD_MINI_OV5640_XCLK
+	help
+	  Must run after the pwm-clock device and before CONFIG_VIDEO_INIT_PRIORITY.
