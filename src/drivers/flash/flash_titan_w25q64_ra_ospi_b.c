@@ -26,27 +26,43 @@
 
 LOG_MODULE_REGISTER(titan_w25q64_ra_ospi_b, CONFIG_FLASH_LOG_LEVEL);
 
-#define W25Q64_JEDEC_ID_LEN         3U
-#define W25Q64_CMD_WRITE_ENABLE     0x06U
-#define W25Q64_CMD_READ_STATUS1     0x05U
-#define W25Q64_CMD_READ_DATA        0x03U
-#define W25Q64_CMD_PAGE_PROGRAM     0x02U
-#define W25Q64_CMD_SECTOR_ERASE_4K  0x20U
-#define W25Q64_CMD_READ_JEDEC_ID    0x9FU
-#define W25Q64_CMD_READ_SFDP        0x5AU
-#define W25Q64_CMD_RESET_ENABLE     0x66U
-#define W25Q64_CMD_RESET_MEMORY     0x99U
-#define W25Q64_SR1_BUSY             BIT(0)
-#define W25Q64_SR1_WEL              BIT(1)
-#define W25Q64_DIRECT_DATA_MAX      8U
-#define W25Q64_ADDRESS_LEN          3U
-#define W25Q64_COMMAND_LEN          1U
-#define W25Q64_ERASE_VALUE          0xffU
-#define W25Q64_RESET_DELAY_US       30U
-#define W25Q64_POWER_UP_DELAY_MS    5U
-#define W25Q64_WRITE_TIMEOUT_US     10000U
-#define W25Q64_ERASE_TIMEOUT_US     500000U
-#define W25Q64_POLL_INTERVAL_US     50U
+#define W25Q64_JEDEC_ID_LEN              3U
+#define W25Q64_CMD_WRITE_ENABLE          0x06U
+#define W25Q64_CMD_VOLATILE_SR_WRITE_EN  0x50U
+#define W25Q64_CMD_READ_STATUS1          0x05U
+#define W25Q64_CMD_READ_STATUS2          0x35U
+#define W25Q64_CMD_WRITE_STATUS2         0x31U
+#define W25Q64_CMD_READ_DATA             0x03U
+#define W25Q64_CMD_FAST_READ_QUAD_IO     0xEBU
+#define W25Q64_CMD_PAGE_PROGRAM          0x02U
+#define W25Q64_CMD_SECTOR_ERASE_4K       0x20U
+#define W25Q64_CMD_READ_JEDEC_ID         0x9FU
+#define W25Q64_CMD_READ_SFDP             0x5AU
+#define W25Q64_CMD_RESET_ENABLE          0x66U
+#define W25Q64_CMD_RESET_MEMORY          0x99U
+#define W25Q64_SR1_BUSY                  BIT(0)
+#define W25Q64_SR1_WEL                   BIT(1)
+#define W25Q64_SR2_QE                    BIT(1)
+/* W25Q64 0xeb Quad I/O read: 1S command, 4S 24-bit address, 8 mode clocks,
+ * then dummy clocks before 4S data. The OSPI_B memory-map path emits the mode
+ * clocks through CMCFG0.ADDRPCD and needs RDLATE=6 for this board at 33.3 MHz.
+ */
+#define W25Q64_QUAD_IO_MODE_BYTE         0xffU
+#define W25Q64_QUAD_IO_XIP_LATENCY_CYCLES 6U
+#define W25Q64_DIRECT_DATA_MAX           8U
+#define W25Q64_ADDRESS_LEN               3U
+#define W25Q64_COMMAND_LEN               1U
+#define W25Q64_ERASE_VALUE               0xffU
+#define W25Q64_RESET_DELAY_US            30U
+#define W25Q64_POWER_UP_DELAY_MS         5U
+#define W25Q64_WRITE_TIMEOUT_US          10000U
+#define W25Q64_ERASE_TIMEOUT_US          500000U
+#define W25Q64_POLL_INTERVAL_US          50U
+
+enum titan_w25q64_bus_mode {
+	TITAN_W25Q64_BUS_SPI,
+	TITAN_W25Q64_BUS_QUAD_IO_READ,
+};
 
 struct titan_w25q64_config {
 	uintptr_t base;
@@ -66,8 +82,16 @@ struct titan_w25q64_data {
 	ospi_b_timing_setting_t timing;
 	ospi_b_table_t xspi_command_set;
 	ospi_b_extended_cfg_t ospi_extend;
+	enum titan_w25q64_bus_mode bus_mode;
 	struct k_sem lock;
 };
+
+static void titan_w25q64_clear_prefetch(const struct device *dev)
+{
+	struct titan_w25q64_data *data = dev->data;
+
+	data->ctrl.p_reg->BMCTL1 = 0x03U << R_XSPI0_BMCTL1_PBUFCLRCH_Pos;
+}
 
 static const struct flash_parameters titan_w25q64_parameters = {
 	.write_block_size = DT_INST_PROP(0, write_block_size),
@@ -98,11 +122,48 @@ static bool titan_w25q64_range_valid(const struct titan_w25q64_config *cfg, off_
 	return (offset >= 0) && ((size_t)offset <= cfg->size) && (len <= (cfg->size - (size_t)offset));
 }
 
+static int titan_w25q64_set_bus_mode(const struct device *dev, enum titan_w25q64_bus_mode mode)
+{
+	struct titan_w25q64_data *data = dev->data;
+	fsp_err_t err;
+
+	if (data->bus_mode == mode) {
+		return 0;
+	}
+
+	if (mode == TITAN_W25Q64_BUS_SPI) {
+		data->ospi_cfg.address_bytes = SPI_FLASH_ADDRESS_BYTES_3;
+		data->ospi_cfg.read_command = W25Q64_CMD_READ_DATA;
+		data->ospi_extend.read_dummy_cycles = 0U;
+		err = R_OSPI_B_SpiProtocolSet(&data->ctrl, SPI_FLASH_PROTOCOL_EXTENDED_SPI);
+	} else {
+		data->ospi_cfg.address_bytes = SPI_FLASH_ADDRESS_BYTES_3;
+		data->ospi_cfg.read_command = W25Q64_CMD_FAST_READ_QUAD_IO;
+		data->ospi_extend.read_dummy_cycles = W25Q64_QUAD_IO_XIP_LATENCY_CYCLES;
+		err = R_OSPI_B_SpiProtocolSet(&data->ctrl, SPI_FLASH_PROTOCOL_1S_4S_4S);
+	}
+
+	if (err != FSP_SUCCESS) {
+		return -EIO;
+	}
+
+	if (mode == TITAN_W25Q64_BUS_QUAD_IO_READ) {
+		data->ctrl.p_reg->CMCFGCS[data->ctrl.channel].CMCFG0 |=
+			W25Q64_QUAD_IO_MODE_BYTE << R_XSPI0_CMCFGCS_CMCFG0_ADDRPCD_Pos;
+		titan_w25q64_clear_prefetch(dev);
+	}
+
+	data->bus_mode = mode;
+
+	return 0;
+}
+
 static int titan_w25q64_direct(const struct device *dev, uint8_t command, uint32_t address,
 				       uint8_t address_len, const uint8_t *tx, uint8_t *rx, size_t len,
 				       uint8_t dummy_cycles)
 {
 	struct titan_w25q64_data *data = dev->data;
+	int ret;
 	spi_flash_direct_transfer_t transfer = {
 		.command = command,
 		.address = address,
@@ -112,6 +173,11 @@ static int titan_w25q64_direct(const struct device *dev, uint8_t command, uint32
 		.dummy_cycles = dummy_cycles,
 	};
 	fsp_err_t err;
+
+	ret = titan_w25q64_set_bus_mode(dev, TITAN_W25Q64_BUS_SPI);
+	if (ret != 0) {
+		return ret;
+	}
 
 	if (len > W25Q64_DIRECT_DATA_MAX) {
 		return -EINVAL;
@@ -132,9 +198,15 @@ static int titan_w25q64_direct(const struct device *dev, uint8_t command, uint32
 	return (err == FSP_SUCCESS) ? 0 : -EIO;
 }
 
+
 static int titan_w25q64_read_status1(const struct device *dev, uint8_t *status)
 {
 	return titan_w25q64_direct(dev, W25Q64_CMD_READ_STATUS1, 0U, 0U, NULL, status, 1U, 0U);
+}
+
+static int titan_w25q64_read_status2(const struct device *dev, uint8_t *status)
+{
+	return titan_w25q64_direct(dev, W25Q64_CMD_READ_STATUS2, 0U, 0U, NULL, status, 1U, 0U);
 }
 
 static int titan_w25q64_wait_ready(const struct device *dev, uint32_t timeout_us)
@@ -191,6 +263,11 @@ static int titan_w25q64_reset_unlocked(const struct device *dev)
 {
 	int ret;
 
+	ret = titan_w25q64_set_bus_mode(dev, TITAN_W25Q64_BUS_SPI);
+	if (ret != 0) {
+		return ret;
+	}
+
 	ret = titan_w25q64_direct(dev, W25Q64_CMD_RESET_ENABLE, 0U, 0U, NULL, NULL, 0U, 0U);
 	if (ret != 0) {
 		return ret;
@@ -206,11 +283,54 @@ static int titan_w25q64_reset_unlocked(const struct device *dev)
 	return titan_w25q64_wait_ready(dev, W25Q64_WRITE_TIMEOUT_US);
 }
 
+static int titan_w25q64_enable_quad_unlocked(const struct device *dev)
+{
+	uint8_t status2;
+	uint8_t value;
+	int ret;
+
+	ret = titan_w25q64_set_bus_mode(dev, TITAN_W25Q64_BUS_SPI);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = titan_w25q64_read_status2(dev, &status2);
+	if (ret != 0) {
+		return ret;
+	}
+
+	if ((status2 & W25Q64_SR2_QE) != 0U) {
+		return 0;
+	}
+
+	ret = titan_w25q64_direct(dev, W25Q64_CMD_VOLATILE_SR_WRITE_EN, 0U, 0U, NULL, NULL, 0U, 0U);
+	if (ret != 0) {
+		return ret;
+	}
+
+	value = status2 | W25Q64_SR2_QE;
+	ret = titan_w25q64_direct(dev, W25Q64_CMD_WRITE_STATUS2, 0U, 0U, &value, NULL, 1U, 0U);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = titan_w25q64_wait_ready(dev, W25Q64_WRITE_TIMEOUT_US);
+	if (ret != 0) {
+		return ret;
+	}
+
+	ret = titan_w25q64_read_status2(dev, &status2);
+	if (ret != 0) {
+		return ret;
+	}
+
+	return ((status2 & W25Q64_SR2_QE) != 0U) ? 0 : -EIO;
+}
+
 static int titan_w25q64_read(const struct device *dev, off_t offset, void *dest, size_t len)
 {
 	const struct titan_w25q64_config *cfg = dev->config;
 	struct titan_w25q64_data *data = dev->data;
-	uint8_t *dst = dest;
 	int ret = 0;
 
 	if (len == 0U) {
@@ -227,18 +347,13 @@ static int titan_w25q64_read(const struct device *dev, off_t offset, void *dest,
 
 	k_sem_take(&data->lock, K_FOREVER);
 
-	while (len > 0U) {
-		size_t chunk = MIN(len, W25Q64_DIRECT_DATA_MAX);
+	ret = titan_w25q64_set_bus_mode(dev, TITAN_W25Q64_BUS_QUAD_IO_READ);
+	if (ret == 0) {
+		const void *src = (const void *)(cfg->base + (uintptr_t)offset);
 
-		ret = titan_w25q64_direct(dev, W25Q64_CMD_READ_DATA, (uint32_t)offset,
-					     W25Q64_ADDRESS_LEN, NULL, dst, chunk, 0U);
-		if (ret != 0) {
-			break;
-		}
-
-		dst += chunk;
-		offset += chunk;
-		len -= chunk;
+		(void)sys_cache_data_invd_range((void *)src, len);
+		titan_w25q64_clear_prefetch(dev);
+		memcpy(dest, src, len);
 	}
 
 	k_sem_give(&data->lock);
@@ -288,6 +403,7 @@ static int titan_w25q64_write(const struct device *dev, off_t offset, const void
 		}
 
 		(void)sys_cache_data_invd_range((void *)(cfg->base + (uintptr_t)offset), chunk);
+		titan_w25q64_clear_prefetch(dev);
 
 		buf += chunk;
 		offset += chunk;
@@ -339,6 +455,7 @@ static int titan_w25q64_erase(const struct device *dev, off_t offset, size_t len
 
 		(void)sys_cache_data_invd_range((void *)(cfg->base + (uintptr_t)offset),
 					       cfg->erase_block_size);
+		titan_w25q64_clear_prefetch(dev);
 
 		offset += cfg->erase_block_size;
 		len -= cfg->erase_block_size;
@@ -454,6 +571,12 @@ static int titan_w25q64_ex_op(const struct device *dev, uint16_t code, const uin
 
 	k_sem_take(&data->lock, K_FOREVER);
 	ret = titan_w25q64_reset_unlocked(dev);
+	if (ret == 0) {
+		ret = titan_w25q64_enable_quad_unlocked(dev);
+	}
+	if (ret == 0) {
+		ret = titan_w25q64_set_bus_mode(dev, TITAN_W25Q64_BUS_QUAD_IO_READ);
+	}
 	k_sem_give(&data->lock);
 
 	return ret;
@@ -549,7 +672,20 @@ static int titan_w25q64_init(const struct device *dev)
 		return -ENODEV;
 	}
 
-	LOG_INF("W25Q64 ready: %zu bytes, OSPI clock %u Hz", cfg->size, clock_freq);
+	ret = titan_w25q64_enable_quad_unlocked(dev);
+	if (ret != 0) {
+		LOG_ERR("W25Q64 Quad enable failed: %d", ret);
+		return ret;
+	}
+
+	ret = titan_w25q64_set_bus_mode(dev, TITAN_W25Q64_BUS_QUAD_IO_READ);
+	if (ret != 0) {
+		LOG_ERR("W25Q64 Quad memory-map setup failed: %d", ret);
+		return ret;
+	}
+
+	LOG_INF("W25Q64 ready: %zu bytes, OSPI clock %u Hz, Quad I/O memory-map enabled",
+		cfg->size, clock_freq);
 
 	return 0;
 }

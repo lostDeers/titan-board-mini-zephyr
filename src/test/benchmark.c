@@ -94,9 +94,11 @@ static void fill_pattern(void)
 
 static int fail(int step, int ret)
 {
-	w25q64_benchmark_result.magic = W25Q64_FAIL_MAGIC;
-	w25q64_benchmark_result.step = step;
-	w25q64_benchmark_result.ret = ret;
+	if (w25q64_benchmark_result.magic != W25Q64_FAIL_MAGIC) {
+		w25q64_benchmark_result.magic = W25Q64_FAIL_MAGIC;
+		w25q64_benchmark_result.step = step;
+		w25q64_benchmark_result.ret = ret;
+	}
 	printk("W25Q64 benchmark FAIL step=%d ret=%d\n", step, ret);
 
 	return ret == 0 ? -EIO : ret;
@@ -107,9 +109,11 @@ static int check_equal(int step, const uint8_t *expected, const uint8_t *actual,
 {
 	for (size_t i = 0; i < len; i++) {
 		if (actual[i] != expected[i]) {
-			w25q64_benchmark_result.mismatch_index = base_index + (uint32_t)i;
-			w25q64_benchmark_result.expected = expected[i];
-			w25q64_benchmark_result.actual = actual[i];
+			if (w25q64_benchmark_result.magic != W25Q64_FAIL_MAGIC) {
+				w25q64_benchmark_result.mismatch_index = base_index + (uint32_t)i;
+				w25q64_benchmark_result.expected = expected[i];
+				w25q64_benchmark_result.actual = actual[i];
+			}
 			return fail(step, -EIO);
 		}
 	}
@@ -127,9 +131,11 @@ static int check_erased(const struct device *flash, int step)
 
 	for (size_t i = 0; i < ARRAY_SIZE(read_buf); i++) {
 		if (read_buf[i] != W25Q64_ERASE_VALUE) {
-			w25q64_benchmark_result.mismatch_index = (uint32_t)i;
-			w25q64_benchmark_result.expected = W25Q64_ERASE_VALUE;
-			w25q64_benchmark_result.actual = read_buf[i];
+			if (w25q64_benchmark_result.magic != W25Q64_FAIL_MAGIC) {
+				w25q64_benchmark_result.mismatch_index = (uint32_t)i;
+				w25q64_benchmark_result.expected = W25Q64_ERASE_VALUE;
+				w25q64_benchmark_result.actual = read_buf[i];
+			}
 			return fail(step, -EIO);
 		}
 	}
@@ -344,6 +350,9 @@ cleanup:
 		goto done;
 	}
 	if (check_erased(flash, 24) != 0) {
+		goto done;
+	}
+	if (w25q64_benchmark_result.magic == W25Q64_FAIL_MAGIC) {
 		goto done;
 	}
 

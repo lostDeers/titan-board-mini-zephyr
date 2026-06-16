@@ -1,13 +1,13 @@
-# W25Q64 Flash API Benchmark
+# W25Q64 Quad Memory-Mapped Read and XIP Benchmark
 
 Date: 2026-06-16
-Status: Runtime Verified
+Status: Runtime Verified for Quad I/O memory-mapped reads and minimal instruction-fetch XIP; Quad program/write remains unimplemented
 
 ## Scope
 
-This report covers the Titan Board Mini onboard Winbond W25Q64 running through the repo-local Zephyr flash driver at `src/drivers/flash/flash_titan_w25q64_ra_ospi_b.c`.
+This report covers the Titan Board Mini onboard Winbond W25Q64 running through the repo-local Zephyr flash driver at `src/drivers/flash/flash_titan_w25q64_ra_ospi_b.c` after adding volatile QE-bit setup, a Runtime Verified Quad I/O memory-mapped read path, and a minimal instruction-fetch XIP probe.
 
-The benchmark app is `src/test/benchmark.c`. It uses Zephyr standard flash APIs only:
+The benchmark app is `src/test/benchmark.c`. It uses Zephyr standard flash APIs only; Quad memory-mapped read is reached through the driver's `flash_read()` implementation:
 
 - `DEVICE_DT_GET(DT_NODELABEL(w25q64))`
 - `device_is_ready()`
@@ -33,7 +33,7 @@ The test is destructive only within the last 16 KiB of W25Q64: offset `0x7fc000`
 - Zephyr: 4.4.0 at `/home/lostdeers/zephyrproject/zephyr`
 - Toolchain: `/home/lostdeers/zephyr-sdk-1.0.1`
 - Worktree: `/home/lostdeers/projects/titan-board-mini-w25q64`
-- Build directory: `build/w25q64-benchmark`
+- Build directory: `build/w25q64-quad-read`
 
 ## Build and Flash
 
@@ -43,7 +43,7 @@ Build command:
 /home/lostdeers/zephyrproject/.venv/bin/west build -p always \
   -b titan_board_mini/r7ka8p1kflcac/cm85 \
   /home/lostdeers/projects/titan-board-mini-w25q64/src/test \
-  -d /home/lostdeers/projects/titan-board-mini-w25q64/build/w25q64-benchmark \
+  -d /home/lostdeers/projects/titan-board-mini-w25q64/build/w25q64-quad-read \
   -- -DZEPHYR_EXTRA_MODULES=/home/lostdeers/projects/titan-board-mini-w25q64
 ```
 
@@ -51,7 +51,7 @@ Build result: PASS.
 
 Memory report:
 
-- FLASH: 65,156 B / 768 KiB, 8.29%
+- FLASH: 65,676 B / 768 KiB, 8.35%
 - RAM: 46,152 B / 1 MiB, 4.40%
 - SDRAM: 0 B / 64 MiB
 
@@ -59,7 +59,7 @@ Flash command:
 
 ```sh
 /home/lostdeers/zephyrproject/.venv/bin/west flash \
-  -d /home/lostdeers/projects/titan-board-mini-w25q64/build/w25q64-benchmark
+  -d /home/lostdeers/projects/titan-board-mini-w25q64/build/w25q64-quad-read
 ```
 
 Flash result: PASS.
@@ -68,11 +68,11 @@ Observed runner output:
 
 - `west flash: using runner jlink`
 - `JLink version: 9.50`
-- `Flashing file: .../build/w25q64-benchmark/zephyr/zephyr.hex`
+- `Flashing file: .../build/w25q64-quad-read/zephyr/zephyr.hex`
 
 ## Generated Configuration Checks
 
-`build/w25q64-benchmark/zephyr/.config` contains:
+`build/w25q64-quad-read/zephyr/.config` contains:
 
 - `CONFIG_TITAN_W25Q64_RA_OSPI_B=y`
 - `CONFIG_FLASH_JESD216=y`
@@ -80,9 +80,11 @@ Observed runner output:
 - `CONFIG_FLASH_PAGE_LAYOUT=y`
 - `CONFIG_FLASH_EX_OP_ENABLED=y`
 
+Cache note: `CONFIG_CACHE_MANAGEMENT` and `CONFIG_DCACHE` are not selected in this build, so the benchmark timings do not include data-cache maintenance effects.
+
 `FLASH_RENESAS_RA_OSPI_B` is not present, so Zephyr did not select the upstream RA OSPI_B flash driver.
 
-`build/w25q64-benchmark/zephyr/zephyr.dts` contains:
+`build/w25q64-quad-read/zephyr/zephyr.dts` contains:
 
 - `w25q64: flash@90000000`
 - `compatible = "titan,w25q64-ra-ospi-b"`
@@ -92,7 +94,7 @@ Observed runner output:
 - `erase-block-size = <0x1000>`
 - `write-block-size = <0x1>`
 
-`build/w25q64-benchmark/build.ninja` contains:
+`build/w25q64-quad-read/build.ninja` contains:
 
 - `src/drivers/flash/flash_titan_w25q64_ra_ospi_b.c.obj`
 - Renesas HAL `r_ospi_b.c.obj`
@@ -107,11 +109,14 @@ GDB command:
 
 ```sh
 /home/lostdeers/zephyr-sdk-1.0.1/gnu/arm-zephyr-eabi/bin/arm-zephyr-eabi-gdb \
-  -q /home/lostdeers/projects/titan-board-mini-w25q64/build/w25q64-benchmark/zephyr/zephyr.elf \
+  -q /home/lostdeers/projects/titan-board-mini-w25q64/build/w25q64-quad-read/zephyr/zephyr.elf \
   -ex "target remote :2331" \
   -ex "monitor halt" \
-  -ex "p w25q64_benchmark_result" \
   -ex "p/x w25q64_benchmark_result" \
+  -ex "p/x titan_w25q64_data.bus_mode" \
+  -ex "p/x titan_w25q64_data.ctrl.spi_protocol" \
+  -ex "p/x titan_w25q64_data.ctrl.p_reg->CMCFGCS[titan_w25q64_data.ctrl.channel].CMCFG0" \
+  -ex "p/x titan_w25q64_data.ctrl.p_reg->CMCFGCS[titan_w25q64_data.ctrl.channel].CMCFG1" \
   -ex "detach" \
   -ex "quit"
 ```
@@ -134,6 +139,17 @@ expected = 0x0
 actual = 0x0
 ```
 
+Driver register/state observation after the benchmark:
+
+```text
+titan_w25q64_data.bus_mode = 0x1
+titan_w25q64_data.ctrl.spi_protocol = 0x90
+CMCFG0 = 0xfff00008
+CMCFG1 = 0x0006eb00
+```
+
+`0x90` is Renesas FSP `SPI_FLASH_PROTOCOL_1S_4S_4S`, used for W25Q64 `0xeb` Quad I/O memory-mapped reads. `CMCFG0.ADDRPCD = 0xff` supplies the W25Q64 mode byte, and `CMCFG1.RDLATE = 6` is the verified latency for this board at the observed 33.3 MHz OSPI clock. Writes and erase commands still switch back to `SPI_FLASH_PROTOCOL_EXTENDED_SPI` and use conservative 1S-1S-1S W25Q64 commands.
+
 Functional checks passed:
 
 - `w25q64` device ready.
@@ -148,6 +164,7 @@ Functional checks passed:
 - Sequential 16 KiB write/readback compare passes.
 - Random 32-byte chunk write/readback over the same 16 KiB area passes.
 - Cleanup erase succeeds and reads back as all `0xff`.
+- `flash_read()` runs through the Quad I/O memory-mapped path and completed the sequential and random readback checks.
 
 ## Benchmark Method
 
@@ -183,20 +200,22 @@ Random read:
 
 | Operation | Bytes | Time | Rate |
 | --- | ---: | ---: | ---: |
-| Erase 16 KiB test area | 16,384 | 238,399 us | n/a |
-| Sequential write | 16,384 | 409,540 us | 40,005 B/s |
-| Sequential read | 16,384 | 16,548 us | 990,089 B/s |
+| Erase 16 KiB test area | 16,384 | 257,794 us | n/a |
+| Sequential write | 16,384 | 409,554 us | 40,004 B/s |
+| Sequential read, Quad I/O memory-mapped | 16,384 | 2,555 us | 6,412,524 B/s |
 | Random write, 512 × 32 B | 16,384 | 409,599 us | 40,000 B/s |
-| Random read, 512 × 32 B | 16,384 | 16,917 us | 968,493 B/s |
-| Cleanup erase 16 KiB test area | 16,384 | 244,571 us | n/a |
+| Random read, 512 × 32 B, Quad I/O memory-mapped | 16,384 | 5,653 us | 2,898,284 B/s |
+| Cleanup erase 16 KiB test area | 16,384 | 257,807 us | n/a |
 
 ## Interpretation
 
-The read path is near 1 MB/s for both sequential and 32-byte random reads. Random reads are about 2.2% slower than sequential reads in this benchmark.
+Quad I/O memory-mapped reads are Runtime Verified. Sequential read improved from the previous conservative 1S read baseline of 990,089 B/s to 6,412,524 B/s. Random 32-byte reads improved from 968,493 B/s to 2,898,284 B/s.
 
-The write path is about 40 KB/s for both sequential and 32-byte random writes. That matches the first-version driver design: writes are correctness-first, 1S-1S-1S, and internally limited by RA OSPI_B direct-transfer chunks and W25Q64 program polling.
+Root cause of the earlier memory-mapped data-read failure: the memory-map path used W25Q64 `0xeb` with `RDLATE = 12`, treating the required 8-bit mode byte as dummy clocks. The flash therefore never saw the recommended `0xff`/Fxh mode byte before data. The fixed configuration programs `CMCFG0.ADDRPCD = 0xff` and uses `RDLATE = 6`; the probe app found that exact memory-map configuration matched data written through the flash API.
 
-These numbers are a baseline for the conservative first-version driver. They are not a Quad, XIP, DMA, cache-optimized, or memory-mapped read ceiling.
+Minimal instruction-fetch XIP was verified with a temporary probe app at `.tmp/xip_exec_probe`. The probe wrote two 4-byte Thumb functions into W25Q64 at `0x907fc000` and `0x907fc100`, verified flash API readback and raw memory-window bytes, invalidated the instruction cache range, then called the functions through Thumb addresses `0x907fc001` and `0x907fc101`. Runtime result: `magic = 0x58495045`, `step = 0x11`, `ret = 0`, `func0_result = 0x5a`, `func1_result = 0xc3`, `CMCFG0 = 0xfff00008`, `CMCFG1 = 0x0006eb00`, `LIOCFGCS = 0x00010090`.
+
+The write path remains about 40 KB/s because it intentionally stays on the Runtime Verified 1S-1S-1S W25Q64 Page Program `0x02` path. The Renesas RA OSPI_B HAL path available here does not safely express W25Q64 Quad Input Page Program `0x32` as a 1-1-4 transaction.
 
 ## Warning Triage
 
@@ -209,7 +228,8 @@ USB/network warning noise is absent because `src/test/prj.conf` disables USB dev
 
 ## Residual Risks
 
-- Benchmark covers only conservative 1S-1S-1S mode.
-- Quad mode is not implemented or verified.
+- Quad program is not implemented; writes remain conservative 1S-1S-1S page program.
+- Minimal instruction-fetch XIP is verified for simple Thumb functions written to W25Q64 and called through the OSPI_B memory window. Full linker-placed code execution from W25Q64 is not covered by this benchmark.
+- Full-XIP code must not call flash API operations that reconfigure OSPI_B out of Quad memory-map mode while executing from W25Q64; that integration pattern is not covered here.
 - Test area is the last 16 KiB of W25Q64. Reserve a formal scratch/test partition before routine destructive test use.
 - Filesystems and partition-manager consumers are not covered here; this app validates raw Zephyr flash API behavior.
