@@ -1,0 +1,23 @@
+/*
+ * Copyright (c) 2026 RT-Thread
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/ {
+	chosen {
+		zephyr,camera = &video_sw_generator;
+	};
+
+	uvc: uvc {
+		compatible = "zephyr,uvc-device";
+	};
+
+	/*
+	 * Synthetic source until a Renesas RA8P1 MIPI CSI/VIN receiver is wired
+	 * into Zephyr's video API. This proves the board USBHS -> UVC path without
+	 * pretending that the OV5640 MIPI image path is complete.
+	 */
+	video_sw_generator: video-sw-generator {
+		compatible = "zephyr,video-sw-generator";
+	};
+};

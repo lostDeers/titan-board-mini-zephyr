@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+
+source "samples/subsys/usb/common/Kconfig.sample_usbd"
+
+menu "Titan Board Mini UVC webcam configuration"
+
+config APP_VIDEO_MAX_RESOLUTIONS
+	int "Maximum number of advertised resolutions"
+	default 5
+	help
+	  Control the maximum number of resolutions advertised to the USB host
+	  when the selected video source reports a range of resolutions.
+
+endmenu
+
+source "Kconfig.zephyr"

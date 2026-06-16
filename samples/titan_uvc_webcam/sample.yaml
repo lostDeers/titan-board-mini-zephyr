@@ -1,0 +1,15 @@
+sample:
+  name: Titan Board Mini UVC webcam
+  description: Exercise the Titan Board Mini USBHS UVC device path with a Zephyr video source.
+common:
+  platform_allow:
+    - titan_board_mini/r7ka8p1kflcac/cm85
+  integration_platforms:
+    - titan_board_mini/r7ka8p1kflcac/cm85
+tests:
+  sample.subsys.usb.titan_board_mini_uvc_webcam:
+    tags:
+      - usb
+      - video
+      - uvc
+    build_only: true
