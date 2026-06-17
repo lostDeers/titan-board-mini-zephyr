@@ -1,6 +1,6 @@
 sample:
   name: Titan Board Mini UVC webcam
-  description: Exercise the Titan Board Mini USBHS UVC device path with a Zephyr video source.
+  description: Stream Titan Board Mini OV5640 MIPI CSI/VIN frames as USB UVC video.
 common:
   platform_allow:
     - titan_board_mini/r7ka8p1kflcac/cm85

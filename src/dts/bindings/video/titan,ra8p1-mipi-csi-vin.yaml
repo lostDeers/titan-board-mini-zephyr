@@ -1,0 +1,25 @@
+# Copyright (c) 2026 RT-Thread
+# SPDX-License-Identifier: Apache-2.0
+
+description: Titan Board Mini RA8P1 MIPI CSI-2 receiver with VIN capture
+
+compatible: "titan,ra8p1-mipi-csi-vin"
+
+include: base.yaml
+
+properties:
+  interrupts:
+    required: true
+
+  interrupt-names:
+    required: true
+
+child-binding:
+  child-binding:
+    include: video-interfaces.yaml
+
+    properties:
+      bus-type:
+        required: true
+      data-lanes:
+        required: true

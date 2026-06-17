@@ -7,4 +7,4 @@ project(titan_board_mini_uvc_webcam)
 
 include(${ZEPHYR_BASE}/samples/subsys/usb/common/common.cmake)
 
-target_sources(app PRIVATE ${ZEPHYR_BASE}/samples/subsys/usb/uvc/src/main.c)
+target_sources(app PRIVATE src/main.c)

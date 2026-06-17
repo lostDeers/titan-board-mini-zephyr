@@ -4,23 +4,42 @@
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/video/video-interfaces.h>
 
 / {
 	chosen {
-		zephyr,camera = &video_sw_generator;
+		zephyr,camera = &mipi_csi_vin;
 	};
 
 	uvc: uvc {
 		compatible = "zephyr,uvc-device";
 	};
 
-	/*
-	 * Synthetic source until a Renesas RA8P1 MIPI CSI/VIN receiver is wired
-	 * into Zephyr's video API. This proves the board USBHS -> UVC path without
-	 * pretending that the OV5640 MIPI image path is complete.
-	 */
-	video_sw_generator: video-sw-generator {
-		compatible = "zephyr,video-sw-generator";
+	/* Verified SCCB/runtime route: GPT11B on P5.00 provides OV5640 XCLK. */
+	ov5640_xclk: ov5640-xclk {
+		compatible = "pwm-clock";
+		#clock-cells = <1>;
+		pwms = <&pwm11 1 PWM_HZ(25000000) PWM_POLARITY_NORMAL>;
+		clock-frequency = <25000000>;
+		pwm-on-delay = <1000>;
+		status = "okay";
+	};
+
+	mipi_csi_vin: mipi-csi-vin {
+		compatible = "titan,ra8p1-mipi-csi-vin";
+		interrupt-parent = <&nvic>;
+		interrupts = <24 12>, <25 12>, <26 12>, <27 12>, <28 12>, <29 12>, <30 12>;
+		interrupt-names = "vin_status", "vin_error", "csi_rx", "csi_dl", "csi_vc", "csi_pm", "csi_gst";
+		status = "okay";
+
+		port {
+			mipi_csi2_ep_in: endpoint {
+				remote-endpoint-label = "ov5640_mipi_ep_out";
+				bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <1 2>;
+			};
+		};
 	};
 };
 
@@ -33,5 +52,51 @@
 		gpio-hog;
 		gpios = <13 GPIO_ACTIVE_HIGH>;
 		output-high;
+	};
+};
+
+&ioport7 {
+	/* Reference BSP drives P7.08 and P7.09 high before reading OV5640 ID. */
+	camera_enable: camera-enable {
+		gpio-hog;
+		gpios = <8 GPIO_ACTIVE_HIGH>;
+		output-high;
+	};
+};
+
+&ioportb {
+	/* Reference BSP leaves P11.00 high during camera initialization. */
+	camera_aux_enable: camera-aux-enable {
+		gpio-hog;
+		gpios = <0 GPIO_ACTIVE_HIGH>;
+		output-high;
+	};
+};
+
+&pwm11 {
+	pinctrl-0 = <&pwm11_camera_xclk_default>;
+	pinctrl-names = "default";
+	interrupts = <38 12>, <39 12>;
+	interrupt-names = "gtioca", "overflow";
+	status = "okay";
+};
+
+&iic0 {
+	clock-frequency = <I2C_BITRATE_FAST>;
+	pinctrl-0 = <&iic0_camera_default>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	ov5640: ov5640@3c {
+		compatible = "ovti,ov5640";
+		reg = <0x3c>;
+		reset-gpios = <&ioport7 9 GPIO_ACTIVE_LOW>;
+		port {
+			ov5640_mipi_ep_out: endpoint {
+				remote-endpoint-label = "mipi_csi2_ep_in";
+				bus-type = <VIDEO_BUS_TYPE_CSI2_DPHY>;
+				data-lanes = <1 2>;
+			};
+		};
 	};
 };

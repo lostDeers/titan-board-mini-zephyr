@@ -2,4 +2,6 @@
 
 menu "Titan Board Mini workspace"
 
+rsource "src/drivers/video/renesas_ra_mipi/Kconfig"
+
 endmenu

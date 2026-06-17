@@ -1,0 +1,18 @@
+# SPDX-License-Identifier: Apache-2.0
+
+config VIDEO_TITAN_RA_MIPI_CSI
+	bool "Titan Board Mini RA8P1 MIPI CSI/VIN video capture"
+	depends on VIDEO && HAS_RENESAS_RA_FSP
+	select VIDEO_OV5640
+	help
+	  Enable the Titan Board Mini RA8P1 MIPI CSI-2 plus VIN capture bridge.
+	  This driver connects the upstream OV5640 sensor driver to Zephyr's video
+	  buffer API so USB UVC can consume captured frames.
+
+config VIDEO_TITAN_RA_MIPI_CSI_INIT_PRIORITY
+	int "Titan RA MIPI CSI/VIN init priority"
+	default 61
+	depends on VIDEO_TITAN_RA_MIPI_CSI
+	help
+	  Must run after the OV5640 sensor driver, which defaults to
+	  CONFIG_VIDEO_INIT_PRIORITY.
