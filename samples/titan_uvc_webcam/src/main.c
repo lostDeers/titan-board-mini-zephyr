@@ -29,7 +29,7 @@ static const struct device *const videoenc_dev = DEVICE_DT_GET_OR_NULL(DT_CHOSEN
 static struct video_caps video_caps = {.type = VIDEO_BUF_TYPE_OUTPUT};
 static struct video_caps videoenc_out_caps = {.type = VIDEO_BUF_TYPE_OUTPUT};
 
-#define TITAN_UVC_FRAME_MAX_SIZE (640U * 480U * 2U)
+#define TITAN_UVC_FRAME_MAX_SIZE (320U * 240U * 2U)
 
 static uint8_t titan_uvc_frame_buffers[CONFIG_VIDEO_BUFFER_POOL_NUM_MAX][TITAN_UVC_FRAME_MAX_SIZE]
 	__aligned(CONFIG_VIDEO_BUFFER_POOL_ALIGN);
