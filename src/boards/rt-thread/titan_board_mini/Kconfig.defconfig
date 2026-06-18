@@ -6,8 +6,8 @@ config BOARD_TITAN_BOARD_MINI
 
 if BOARD_TITAN_BOARD_MINI
 
-# SDRAM requires MM_DRV
-config MM_DRV
-	default y if SDRAM
+# SDRAM controller is described in DTS and initialized by the MEMC driver.
+config MEMC
+	default y
 
 endif # BOARD_TITAN_BOARD_MINI

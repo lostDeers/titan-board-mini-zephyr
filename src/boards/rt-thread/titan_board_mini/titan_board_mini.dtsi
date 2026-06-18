@@ -8,6 +8,7 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/memory-attr/memory-attr-arm.h>
+#include <zephyr/dt-bindings/memory-attr/memory-attr-sw.h>
 #include <zephyr/dt-bindings/memory-controller/renesas,ra-sdram.h>
 #include "titan_board_mini-pinctrl.dtsi"
 
@@ -74,6 +75,7 @@
 		device_type = "memory";
 		reg = <0x68000000 DT_SIZE_M(64)>;
 		zephyr,memory-region = "SDRAM";
+		zephyr,memory-attr = <(DT_MEM_CACHEABLE | DT_MEM_SW_ALLOC_CACHE | DT_MEM_ARM_MPU_RAM)>;
 		status = "okay";
 	};
 
@@ -180,7 +182,7 @@
 	pinctrl-names = "default";
 	status = "okay";
 	auto-refresh-interval = <SDRAM_AUTO_REFRESH_INTERVAL_10CYCLES>;
-	auto-refresh-count = <SDRAM_AUTO_REFRESH_COUNT_2TIMES>;
+	auto-refresh-count = <SDRAM_AUTO_REFRESH_COUNT_8TIMES>;
 	precharge-cycle-count = <SDRAM_AUTO_PRECHARGE_CYCLE_3CYCLES>;
 	multiplex-addr-shift = "9-bit";
 	endian-mode = "little-endian";

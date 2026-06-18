@@ -31,10 +31,6 @@ static struct video_caps videoenc_out_caps = {.type = VIDEO_BUF_TYPE_OUTPUT};
 
 #define TITAN_UVC_FRAME_MAX_SIZE (320U * 240U * 2U)
 
-static uint8_t titan_uvc_frame_buffers[CONFIG_VIDEO_BUFFER_POOL_NUM_MAX][TITAN_UVC_FRAME_MAX_SIZE]
-	__aligned(CONFIG_VIDEO_BUFFER_POOL_ALIGN);
-static struct video_buffer titan_uvc_vbufs[CONFIG_VIDEO_BUFFER_POOL_NUM_MAX];
-
 #if DT_HAS_CHOSEN(zephyr_videoenc) && CONFIG_VIDEO_BUFFER_POOL_NUM_MAX < 2
 #error CONFIG_VIDEO_BUFFER_POOL_NUM_MAX must be >=2 in order to use a zephyr,videoenc
 #endif
@@ -447,25 +443,22 @@ int main(void)
 		LOG_WRN("Could not set the framerate of %s", video_dev->name);
 	}
 
-	LOG_INF("Preparing %u buffers of %u bytes", uvc_buf_count, fmt.size);
+	LOG_INF("Preparing %u SDRAM video buffers of %u bytes", uvc_buf_count, fmt.size);
 
 	if (fmt.size > TITAN_UVC_FRAME_MAX_SIZE) {
-		LOG_ERR("Selected frame size %u exceeds static buffer size %u", fmt.size,
+		LOG_ERR("Selected frame size %u exceeds SDRAM buffer size %u", fmt.size,
 			TITAN_UVC_FRAME_MAX_SIZE);
 		return -ENOMEM;
 	}
 
 	for (int i = 0; i < uvc_buf_count; i++) {
-		uint16_t index;
-
-		ret = video_import_buffer(titan_uvc_frame_buffers[i], fmt.size, &index);
-		if (ret != 0) {
-			LOG_ERR("Could not import static video buffer %d", i);
-			return ret;
+		vbuf = video_buffer_aligned_alloc(fmt.size, CONFIG_VIDEO_BUFFER_POOL_ALIGN,
+						 K_NO_WAIT);
+		if (vbuf == NULL) {
+			LOG_ERR("Could not allocate SDRAM video buffer %d", i);
+			return -ENOMEM;
 		}
 
-		vbuf = &titan_uvc_vbufs[i];
-		vbuf->index = index;
 		vbuf->type = VIDEO_BUF_TYPE_OUTPUT;
 
 		ret = video_enqueue(video_dev, vbuf);

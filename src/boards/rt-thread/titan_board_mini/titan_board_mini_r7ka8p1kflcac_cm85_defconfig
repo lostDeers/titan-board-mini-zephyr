@@ -31,9 +31,6 @@ CONFIG_SDHC=y
 # Enable USB device
 CONFIG_USB_DEVICE_STACK=y
 
-# Enable SDRAM
-CONFIG_MM_DRV=y
-
 # Enable Input (buttons)
 CONFIG_INPUT=y
 

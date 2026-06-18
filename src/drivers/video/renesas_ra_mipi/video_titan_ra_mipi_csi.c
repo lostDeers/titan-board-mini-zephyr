@@ -20,6 +20,7 @@
 
 #include "fsp/r_mipi_csi.h"
 #include "fsp/r_vin.h"
+#include "video_common.h"
 
 void vin_status_isr(void);
 void vin_error_isr(void);
@@ -38,6 +39,7 @@ LOG_MODULE_REGISTER(titan_ra_mipi_csi, CONFIG_VIDEO_LOG_LEVEL);
 					   TITAN_RA_MIPI_BYTES_PIXEL)
 #define TITAN_RA_MIPI_FRAME_COUNT 3U
 
+#define TITAN_RA_OV5640_REG8(addr) ((uint32_t)(addr) | VIDEO_REG_ADDR16_DATA8)
 struct titan_ra_mipi_config {
 	void (*irq_config_func)(void);
 	const struct device *source_dev;
@@ -85,12 +87,6 @@ static void titan_ra_mipi_csi_callback(mipi_csi_callback_args_t *args)
 	ARG_UNUSED(args);
 }
 
-static int titan_ra_mipi_ov5640_write(const struct i2c_dt_spec *i2c, uint16_t reg, uint8_t val)
-{
-	const uint8_t buf[] = {reg >> 8, reg & 0xff, val};
-
-	return i2c_write_dt(i2c, buf, sizeof(buf));
-}
 
 static int titan_ra_mipi_ov5640_configure_for_vin(const struct device *dev)
 {
@@ -103,25 +99,47 @@ static int titan_ra_mipi_ov5640_configure_for_vin(const struct device *dev)
 		return -ENODEV;
 	}
 
-	/* Match the Titan Mini BSP's known-good OV5640 MIPI timing for VIN. */
-	ret = titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x3035, 0x12);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x3036, 0x8c);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x3037, 0x13);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x3108, 0x01);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x300e, 0x44);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x4300, 0x32);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x501f, 0x00);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x4800, 0x24);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x3007, 0xfb);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x380c, 0x08);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x380d, 0x50);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x380e, 0x04);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x380f, 0xb0);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x460b, 0x35);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x460c, 0x22);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x4837, 0x0a);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x3824, 0x01);
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x4202, 0x0f);
+	/* Match the Titan Mini BSP's known-good OV5640 MIPI timing and ISP tuning for VIN. */
+	static const struct video_reg16 regs[] = {
+		{0x3035, 0x12}, {0x3036, 0x8c}, {0x3037, 0x13}, {0x3108, 0x01},
+		{0x300e, 0x44}, {0x4300, 0x32}, {0x501f, 0x00}, {0x4800, 0x24},
+		{0x3007, 0xfb}, {0x380c, 0x08}, {0x380d, 0x50}, {0x380e, 0x04},
+		{0x380f, 0xb0}, {0x460b, 0x35}, {0x460c, 0x22}, {0x4837, 0x0a},
+		{0x3824, 0x01},
+
+		/* Auto exposure and manual white-balance gains from the Titan Mini reference. */
+		{0x3a0f, 0x40}, {0x3a10, 0x30}, {0x3a1b, 0x40}, {0x3a1e, 0x30},
+		{0x3a11, 0x71}, {0x3a1f, 0x20}, {0x3406, 0x01}, {0x3400, 0x06},
+		{0x3401, 0x80}, {0x3402, 0x04}, {0x3403, 0x00}, {0x3404, 0x06},
+		{0x3405, 0x00},
+
+		/* AWB, color matrix, sharpening, gamma, UV/brightness, and ISP controls. */
+		{0x5180, 0xff}, {0x5181, 0xf2}, {0x5182, 0x00}, {0x5183, 0x14},
+		{0x5184, 0x25}, {0x5185, 0x24}, {0x5186, 0x16}, {0x5187, 0x16},
+		{0x5188, 0x16}, {0x5189, 0x62}, {0x518a, 0x62}, {0x518b, 0xf0},
+		{0x518c, 0xb2}, {0x518d, 0x50}, {0x518e, 0x30}, {0x518f, 0x30},
+		{0x5190, 0x50}, {0x5191, 0xf8}, {0x5192, 0x04}, {0x5193, 0x70},
+		{0x5194, 0xf0}, {0x5195, 0xf0}, {0x5196, 0x03}, {0x5197, 0x01},
+		{0x5198, 0x04}, {0x5199, 0x12}, {0x519a, 0x04}, {0x519b, 0x00},
+		{0x519c, 0x06}, {0x519d, 0x82}, {0x519e, 0x38}, {0x5381, 0x1e},
+		{0x5382, 0x5b}, {0x5383, 0x14}, {0x5384, 0x06}, {0x5385, 0x82},
+		{0x5386, 0x88}, {0x5387, 0x7c}, {0x5388, 0x60}, {0x5389, 0x1c},
+		{0x538a, 0x01}, {0x538b, 0x98}, {0x5300, 0x08}, {0x5301, 0x30},
+		{0x5302, 0x5f}, {0x5303, 0x10}, {0x5304, 0x08}, {0x5305, 0x30},
+		{0x5306, 0x28}, {0x5307, 0x38}, {0x5309, 0x08}, {0x530a, 0x30},
+		{0x530b, 0x04}, {0x530c, 0x06}, {0x5480, 0x01}, {0x5481, 0x06},
+		{0x5482, 0x12}, {0x5483, 0x24}, {0x5484, 0x4a}, {0x5485, 0x58},
+		{0x5486, 0x65}, {0x5487, 0x72}, {0x5488, 0x7d}, {0x5489, 0x88},
+		{0x548a, 0x92}, {0x548b, 0xa3}, {0x548c, 0xb2}, {0x548d, 0xc8},
+		{0x548e, 0xdd}, {0x548f, 0xf0}, {0x5490, 0x15}, {0x5580, 0x06},
+		{0x5583, 0x40}, {0x5584, 0x20}, {0x5585, 0x00}, {0x5586, 0x20},
+		{0x5587, 0x00}, {0x5588, 0x01}, {0x5589, 0x10}, {0x558a, 0x00},
+		{0x558b, 0xf8}, {0x501d, 0x40}, {0x5000, 0xa7}, {0x5001, 0xa3},
+		{0x503d, 0x00},
+		{0x4202, 0x0f},
+	};
+
+	ret = video_write_cci_multiregs16(&config->sensor_i2c, regs, ARRAY_SIZE(regs));
 	atomic_set(&data->last_sensor_ret, ret);
 
 	return ret;
@@ -133,11 +151,16 @@ static int titan_ra_mipi_ov5640_stream_gate(const struct device *dev, bool enabl
 	struct titan_ra_mipi_data *data = dev->data;
 	int ret;
 
-	ret = 0;
 	if (enable) {
-		ret = titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x300e, 0x44);
+		ret = video_write_cci_reg(&config->sensor_i2c, TITAN_RA_OV5640_REG8(0x300e), 0x44);
+		if (ret < 0) {
+			atomic_set(&data->last_sensor_ret, ret);
+			return ret;
+		}
 	}
-	ret |= titan_ra_mipi_ov5640_write(&config->sensor_i2c, 0x4202, enable ? 0x00 : 0x0f);
+
+	ret = video_write_cci_reg(&config->sensor_i2c, TITAN_RA_OV5640_REG8(0x4202),
+				  enable ? 0x00 : 0x0f);
 	atomic_set(&data->last_sensor_ret, ret);
 
 	return ret;
@@ -167,7 +190,6 @@ static void titan_ra_mipi_cache_flush(const void *addr, size_t size)
 static void titan_ra_mipi_copy_work(struct k_work *work)
 {
 	struct titan_ra_mipi_data *data = CONTAINER_OF(work, struct titan_ra_mipi_data, copy_work);
-	const struct device *dev = data->dev;
 	uint8_t *src;
 	struct video_buffer *vbuf;
 
@@ -190,7 +212,6 @@ static void titan_ra_mipi_copy_work(struct k_work *work)
 			titan_ra_mipi_cache_flush(vbuf->buffer, TITAN_RA_MIPI_FRAME_SIZE);
 		}
 
-		(void)titan_ra_mipi_ov5640_stream_gate(dev, false);
 		vbuf->bytesused = TITAN_RA_MIPI_FRAME_SIZE;
 		vbuf->line_offset = 0;
 		vbuf->timestamp = k_uptime_get_32();
@@ -252,6 +273,11 @@ static int titan_ra_mipi_set_format(const struct device *dev, struct video_forma
 		return -ENOTSUP;
 	}
 
+	/*
+	 * Program OV5640's upstream 320x240 CSI-2 scaler path, then apply the
+	 * Titan Mini VIN-specific YUV422/ISP register patch below. VIN captures
+	 * into the RGB565 buffers advertised to UVC.
+	 */
 	ret = video_set_format(config->source_dev, fmt);
 	if (ret < 0) {
 		return ret;
@@ -302,12 +328,6 @@ static int titan_ra_mipi_start_capture(const struct device *dev)
 		return -ENODEV;
 	}
 
-	ret = titan_ra_mipi_ov5640_stream_gate(dev, false);
-	if (ret < 0) {
-		atomic_set(&data->last_ret, ret);
-		return ret;
-	}
-	atomic_set(&data->last_step, 2);
 
 	if (!data->vin_ctrl->open) {
 		err = R_VIN_Open(data->vin_ctrl, data->vin_cfg);
@@ -645,7 +665,7 @@ static DEVICE_API(video, titan_ra_mipi_driver_api) = {
 		.input_ctrl.image_stride = TITAN_RA_MIPI_WIDTH,                                      \
 		.output_ctrl.image_buffer = {titan_ra_mipi_frame0_##inst, titan_ra_mipi_frame1_##inst,\
 						 titan_ra_mipi_frame2_##inst},                                 \
-		.conversion_ctrl.data_mode_bits.output_data_byte_swap = 1,                            \
+		.conversion_ctrl.data_mode_bits.output_data_byte_swap = 0,                            \
 		.conversion_ctrl.data_mode_bits.rgb8888_alpha_value = 0xaa,                           \
 		.conversion_data.yc_rgb_conversion_setting_1_bits.y_mul = 4767,                       \
 		.conversion_data.yc_rgb_conversion_setting_1_bits.round_down_disable = 1,             \
