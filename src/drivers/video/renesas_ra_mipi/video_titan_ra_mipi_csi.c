@@ -186,6 +186,8 @@ static void titan_ra_mipi_cache_flush(const void *addr, size_t size)
 #endif
 }
 
+static int titan_ra_mipi_start_capture(const struct device *dev);
+
 
 static void titan_ra_mipi_copy_work(struct k_work *work)
 {
@@ -223,6 +225,11 @@ static void titan_ra_mipi_copy_work(struct k_work *work)
 			k_poll_signal_raise(data->signal, VIDEO_BUF_DONE);
 		}
 #endif
+	}
+
+	if (atomic_get(&data->streaming) && !atomic_get(&data->capture_active) &&
+	    k_fifo_peek_head(&data->fifo_in) != NULL) {
+		(void)titan_ra_mipi_start_capture(data->dev);
 	}
 }
 

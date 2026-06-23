@@ -542,9 +542,8 @@ int main(void)
 					    VIDEO_BUF_TYPE_INPUT, VIDEO_BUF_TYPE_OUTPUT,
 					    K_NO_WAIT);
 		if (ret != 0 && ret != -EAGAIN) {
-			LOG_ERR("Failed to transfer from %s to %s",
-				uvc_dev->name, uvc_src_dev->name);
-			return ret;
+			LOG_WRN("Failed to return buffer from %s to %s: %d",
+				uvc_dev->name, uvc_src_dev->name, ret);
 		}
 
 		k_poll_signal_reset(&sig);
