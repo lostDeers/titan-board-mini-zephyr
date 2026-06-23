@@ -16,47 +16,17 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/usb/class/usbd_uvc.h>
 #include <zephyr/sys/util.h>
-#include <zephyr/sys/atomic.h>
 #include <zephyr/video/video.h>
 
 LOG_MODULE_REGISTER(uvc_sample, LOG_LEVEL_INF);
 
 const static struct device *const uvc_dev = DEVICE_DT_GET(DT_NODELABEL(uvc));
 const static struct device *const video_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_camera));
-static const struct device *const videoenc_dev = DEVICE_DT_GET_OR_NULL(DT_CHOSEN(zephyr_videoenc));
 
 /* Format capabilities of video_dev, used everywhere through the sample */
 static struct video_caps video_caps = {.type = VIDEO_BUF_TYPE_OUTPUT};
-static struct video_caps videoenc_out_caps = {.type = VIDEO_BUF_TYPE_OUTPUT};
 
 #define TITAN_UVC_FRAME_MAX_SIZE (320U * 240U * 2U)
-
-#if DT_HAS_CHOSEN(zephyr_videoenc) && CONFIG_VIDEO_BUFFER_POOL_NUM_MAX < 2
-#error CONFIG_VIDEO_BUFFER_POOL_NUM_MAX must be >=2 in order to use a zephyr,videoenc
-#endif
-
-static bool app_has_videoenc(void)
-{
-	return (videoenc_dev != NULL);
-}
-
-static const struct device *app_uvc_source_dev(void)
-{
-	if (app_has_videoenc()) {
-		return videoenc_dev;
-	} else {
-		return video_dev;
-	}
-}
-
-static struct video_caps *app_uvc_source_caps(void)
-{
-	if (app_has_videoenc()) {
-		return &videoenc_out_caps;
-	} else {
-		return &video_caps;
-	}
-}
 
 /* Pixel formats present in one of the UVC 1.5 standard */
 static bool app_is_supported_format(uint32_t pixfmt)
@@ -70,7 +40,7 @@ static bool app_is_supported_format(uint32_t pixfmt)
 
 static bool app_has_supported_format(void)
 {
-	const struct video_caps *const caps = app_uvc_source_caps();
+	const struct video_caps *const caps = &video_caps;
 	const struct video_format_cap *const fmts = caps->format_caps;
 
 	for (int i = 0; fmts[i].pixelformat != 0; i++) {
@@ -84,7 +54,6 @@ static bool app_has_supported_format(void)
 
 static int app_add_format(uint32_t pixfmt, uint32_t width, uint32_t height, bool has_sup_fmts)
 {
-	const struct device *uvc_src_dev = app_uvc_source_dev();
 	struct video_format fmt = {
 		.pixelformat = pixfmt,
 		.width = width,
@@ -99,7 +68,7 @@ static int app_add_format(uint32_t pixfmt, uint32_t width, uint32_t height, bool
 	}
 
 	/* Set the format to get the size */
-	ret = video_set_compose_format(uvc_src_dev, &fmt);
+	ret = video_set_compose_format(video_dev, &fmt);
 	if (ret != 0) {
 		LOG_ERR("Could not set the format of %s to %s %ux%u (size %u)",
 			video_dev->name, VIDEO_FOURCC_TO_STR(fmt.pixelformat),
@@ -125,7 +94,7 @@ struct video_resolution {
 	uint16_t height;
 };
 
-static struct video_resolution video_common_fmts[] = {
+static const struct video_resolution video_common_fmts[] = {
 	{ .width = 160,		.height = 120,	},	/* QQVGA */
 	{ .width = 320,		.height = 240,	},	/* QVGA */
 	{ .width = 640,		.height = 480,	},	/* VGA */
@@ -140,33 +109,13 @@ static struct video_resolution video_common_fmts[] = {
 /* Submit to UVC only the formats expected to be working (enough memory for the size, etc.) */
 static int app_add_filtered_formats(void)
 {
-	struct video_caps *uvc_src_caps = app_uvc_source_caps();
 	const bool has_sup_fmts = app_has_supported_format();
 	int ret;
 
 	for (int i = 0; video_caps.format_caps[i].pixelformat != 0; i++) {
-		/*
-		 * FIXME - in the meantime that auto-negotiation is supported,
-		 * use the resolution list of the camera for NV12 pixelformat
-		 */
 		const struct video_format_cap *vcap = &video_caps.format_caps[i];
-		uint32_t pixelformat;
+		const uint32_t pixelformat = vcap->pixelformat;
 		int count = 1;
-
-		if (app_has_videoenc() && vcap->pixelformat != VIDEO_PIX_FMT_NV12) {
-			continue;
-		}
-
-		if (app_has_videoenc()) {
-			/*
-			 * FIXME - in the meantime that auto-negotiation is supported,
-			 * when a video encoder is present, always use the first pixelformat.
-			 */
-			pixelformat = uvc_src_caps->format_caps[0].pixelformat;
-			__ASSERT_NO_MSG(pixelformat != 0);
-		} else {
-			pixelformat = vcap->pixelformat;
-		}
 
 		ret = app_add_format(pixelformat, vcap->width_min, vcap->height_min,
 				     has_sup_fmts);
@@ -219,108 +168,8 @@ static int app_add_filtered_formats(void)
 	return 0;
 }
 
-static int app_init_videoenc(const struct device *const dev)
-{
-	int ret;
-
-	if (!device_is_ready(dev)) {
-		LOG_ERR("video encoder %s failed to initialize", dev->name);
-		return -ENODEV;
-	}
-
-	ret = video_get_caps(dev, &videoenc_out_caps);
-	if (ret != 0) {
-		LOG_ERR("Unable to retrieve video encoder output capabilities");
-		return ret;
-	}
-
-	/*
-	 * FIXME - we should look carefully at both video capture output and encoder input
-	 * caps to detect intermediate format.
-	 * This is where we should define the format which is going to be used
-	 * between the camera and the encoder input
-	 */
-
-	return 0;
-}
-
-static int app_configure_videoenc(const struct device *const dev,
-				  uint32_t width, uint32_t height,
-				  uint32_t sink_pixelformat, uint32_t source_pixelformat,
-				  uint32_t nb_buffer)
-{
-	struct video_format fmt = {
-		.width = width,
-		.height = height,
-	};
-	struct video_buffer *buf;
-	int ret;
-
-	/*
-	 * Need to configure both input & output of the encoder
-	 * and allocate / enqueue buffers to the output of the
-	 * encoder
-	 */
-	fmt.type = VIDEO_BUF_TYPE_INPUT;
-	fmt.pixelformat = sink_pixelformat;
-	ret = video_set_compose_format(dev, &fmt);
-	if (ret != 0) {
-		LOG_ERR("Could not set the %s encoder input format", dev->name);
-		return ret;
-	}
-
-	fmt.type = VIDEO_BUF_TYPE_OUTPUT;
-	fmt.pixelformat = source_pixelformat;
-	ret = video_set_compose_format(dev, &fmt);
-	if (ret != 0) {
-		LOG_ERR("Could not set the %s encoder output format", dev->name);
-		return ret;
-	}
-
-	LOG_INF("Preparing %u buffers of %u bytes for encoder output", nb_buffer, fmt.size);
-
-	for (int i = 0; i < nb_buffer; i++) {
-		buf = video_buffer_aligned_alloc(fmt.size, CONFIG_VIDEO_BUFFER_POOL_ALIGN,
-						 K_NO_WAIT);
-		if (buf == NULL) {
-			LOG_ERR("Could not allocate the encoder output buffer");
-			return -ENOMEM;
-		}
-
-		buf->type = VIDEO_BUF_TYPE_OUTPUT;
-
-		ret = video_enqueue(dev, buf);
-		if (ret != 0) {
-			LOG_ERR("Could not enqueue video buffer");
-			return ret;
-		}
-	}
-
-	return 0;
-}
-
-static int app_start_videoenc(const struct device *const dev)
-{
-	int ret;
-
-	ret = video_stream_start(dev, VIDEO_BUF_TYPE_OUTPUT);
-	if (ret != 0) {
-		LOG_ERR("Failed to start %s output", dev->name);
-		return ret;
-	}
-
-	ret = video_stream_start(dev, VIDEO_BUF_TYPE_INPUT);
-	if (ret != 0) {
-		LOG_ERR("Failed to start %s input", dev->name);
-		return ret;
-	}
-
-	return 0;
-}
-
 int main(void)
 {
-	const struct device *uvc_src_dev = app_uvc_source_dev();
 	struct usbd_context *sample_usbd;
 	struct video_buffer *vbuf;
 	struct video_format fmt = {0};
@@ -339,21 +188,11 @@ int main(void)
 	ret = video_get_caps(video_dev, &video_caps);
 	if (ret != 0) {
 		LOG_ERR("Unable to retrieve video capabilities");
-		return 0;
-	}
-
-	if (app_has_videoenc()) {
-		ret = app_init_videoenc(videoenc_dev);
-		if (ret != 0) {
-			return ret;
-		}
-
-		/* When using encoder, we split the VIDEO_BUFFER_POOL_NUM_MAX in 2 */
-		uvc_buf_count /= 2;
+		return ret;
 	}
 
 	/* Initialize control descriptors from the video device */
-	uvc_device_init(uvc_dev, uvc_src_dev);
+	uvc_device_init(uvc_dev, video_dev);
 
 	/* Fill the table of formats */
 	ret = app_add_filtered_formats();
@@ -404,40 +243,16 @@ int main(void)
 		VIDEO_FOURCC_TO_STR(fmt.pixelformat), fmt.width, fmt.height,
 		frmival.numerator, frmival.denominator);
 
-	if (app_has_videoenc()) {
-		/*
-		 * FIXME - this is currently hardcoded in NV12 while it should be
-		 * a format that has been validated for both video dev and encoder
-		 */
-		ret = app_configure_videoenc(videoenc_dev, fmt.width, fmt.height,
-					     VIDEO_PIX_FMT_NV12, fmt.pixelformat,
-					     CONFIG_VIDEO_BUFFER_POOL_NUM_MAX - uvc_buf_count);
-		if (ret != 0) {
-			return ret;
-		}
-	}
-
 	fmt.type = VIDEO_BUF_TYPE_OUTPUT;
-	if (app_has_videoenc()) {
-		/*
-		 * FIXME - this is currently hardcoded in NV12 while it should be
-		 * a format that has been validated for both video dev and encoder
-		 */
-		fmt.pixelformat = VIDEO_PIX_FMT_NV12;
-	}
 
 	ret = video_set_compose_format(video_dev, &fmt);
 	if (ret != 0) {
 		LOG_ERR("Could not set the format of %s to %s %ux%u (size %u)",
 			video_dev->name, VIDEO_FOURCC_TO_STR(fmt.pixelformat),
 			fmt.width, fmt.height, fmt.size);
+		return ret;
 	}
 
-	/*
-	 * FIXME - shortcut here since current available encoders do not
-	 * have frmival support for the time being so this is done directly
-	 * at camera level
-	 */
 	ret = video_set_frmival(video_dev, &frmival);
 	if (ret != 0) {
 		LOG_WRN("Could not set the framerate of %s", video_dev->name);
@@ -468,14 +283,14 @@ int main(void)
 		}
 	}
 
-	LOG_DBG("Preparing signaling for %s input/output", uvc_src_dev->name);
+	LOG_DBG("Preparing signaling for %s input/output", video_dev->name);
 
 	k_poll_signal_init(&sig);
 	k_poll_event_init(&evt[0], K_POLL_TYPE_SIGNAL, K_POLL_MODE_NOTIFY_ONLY, &sig);
 
-	ret = video_set_signal(uvc_src_dev, &sig);
+	ret = video_set_signal(video_dev, &sig);
 	if (ret != 0) {
-		LOG_WRN("Failed to setup the signal on %s output endpoint", uvc_src_dev->name);
+		LOG_WRN("Failed to setup the signal on %s output endpoint", video_dev->name);
 		timeout = K_MSEC(1);
 	}
 
@@ -486,13 +301,6 @@ int main(void)
 	}
 
 	LOG_INF("Starting the video transfer");
-
-	if (app_has_videoenc()) {
-		ret = app_start_videoenc(videoenc_dev);
-		if (ret != 0) {
-			return ret;
-		}
-	}
 
 	ret = video_stream_start(video_dev, VIDEO_BUF_TYPE_OUTPUT);
 	if (ret != 0) {
@@ -507,43 +315,19 @@ int main(void)
 			return ret;
 		}
 
-		if (app_has_videoenc()) {
-			ret = video_transfer_buffer(video_dev, uvc_src_dev,
-						    VIDEO_BUF_TYPE_OUTPUT, VIDEO_BUF_TYPE_INPUT,
-						    K_NO_WAIT);
-			if (ret != 0 && ret != -EAGAIN) {
-				LOG_ERR("Failed to transfer from %s to %s",
-					video_dev->name, uvc_src_dev->name);
-				return ret;
-			}
-		}
-
-		ret = video_transfer_buffer(uvc_src_dev, uvc_dev,
-					    VIDEO_BUF_TYPE_OUTPUT, VIDEO_BUF_TYPE_INPUT,
-					    K_NO_WAIT);
+		ret = video_transfer_buffer(video_dev, uvc_dev, VIDEO_BUF_TYPE_OUTPUT,
+						    VIDEO_BUF_TYPE_INPUT, K_NO_WAIT);
 		if (ret != 0 && ret != -EAGAIN) {
 			LOG_ERR("Failed to transfer from %s to %s",
-				uvc_src_dev->name, uvc_dev->name);
+				video_dev->name, uvc_dev->name);
 			return ret;
 		}
 
-		if (app_has_videoenc()) {
-			ret = video_transfer_buffer(uvc_src_dev, video_dev,
-						    VIDEO_BUF_TYPE_INPUT, VIDEO_BUF_TYPE_OUTPUT,
-						    K_NO_WAIT);
-			if (ret != 0 && ret != -EAGAIN) {
-				LOG_ERR("Failed to transfer from %s to %s",
-					uvc_src_dev->name, video_dev->name);
-				return ret;
-			}
-		}
-
-		ret = video_transfer_buffer(uvc_dev, uvc_src_dev,
-					    VIDEO_BUF_TYPE_INPUT, VIDEO_BUF_TYPE_OUTPUT,
-					    K_NO_WAIT);
+		ret = video_transfer_buffer(uvc_dev, video_dev, VIDEO_BUF_TYPE_INPUT,
+						    VIDEO_BUF_TYPE_OUTPUT, K_NO_WAIT);
 		if (ret != 0 && ret != -EAGAIN) {
 			LOG_WRN("Failed to return buffer from %s to %s: %d",
-				uvc_dev->name, uvc_src_dev->name, ret);
+				uvc_dev->name, video_dev->name, ret);
 		}
 
 		k_poll_signal_reset(&sig);

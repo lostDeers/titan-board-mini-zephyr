@@ -60,7 +60,7 @@
   - 过滤并注册 UVC 支持格式。
   - 等待主机选择视频格式。
   - 配置摄像头/VIN 输出格式和帧间隔。
-  - 分配 SDRAM 视频缓冲并在 camera、可选 encoder、UVC 之间转交 buffer。
+  - 分配 SDRAM 视频缓冲并在 camera 和 UVC 之间转交 buffer。
 
 - `src/drivers/video/renesas_ra_mipi/video_titan_ra_mipi_csi.c`
   - 本地 RA8P1 MIPI CSI/VIN video 驱动。
@@ -253,5 +253,5 @@ ffplay -f v4l2 \
 - UVC 样例按最大帧大小 `320 * 240 * 2` 限制 buffer。
 - `ffplay`/FFmpeg 必须使用 `-input_format rgb565le`；`RGBP` 是 V4L2 fourcc，不是 FFmpeg input format 名。
 - 打开流的前几帧可能出现 V4L2/FFmpeg error/corrupted 标记；后续帧在本次验证中恢复为完整帧。产品化前需要继续收敛。
-- 默认没有启用视频编码器路径；有 encoder 时，样例中仍有硬编码 NV12 的 FIXME。
+- 样例已移除未验证的视频编码器分支；当前只维护 camera 到 UVC 的直接路径。
 - 系统相机、浏览器 WebRTC、`guvcview`、断连重连、长时间运行、自动对焦和亮场画质仍未验证。
