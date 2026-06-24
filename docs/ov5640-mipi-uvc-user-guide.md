@@ -7,11 +7,11 @@
 - `samples/ov5640_af_mipi_probe/`：OV5640 传感器探测样例，用于确认 XCLK、I2C/SCCB、设备就绪、格式能力和部分控制项。
 - `samples/titan_uvc_webcam/`：UVC 摄像头样例，用于从 OV5640 经 RA8P1 MIPI CSI/VIN 路径采集图像，并通过 USB UVC 暴露给主机。
 
-当前主路径固定为 `320x240`、`RGB565`。摄像头侧使用 3 个 SDRAM video buffer，UVC USB 侧使用 copied-payload `net_buf` 池，当前样例配置为 `CONFIG_USBD_VIDEO_NUM_BUFS=320`。样例通过构建期生成的 project-local Zephyr USB override 修复重复预览路径，不修改 `ZEPHYR_BASE` 上游源码树。
+当前主路径固定为 `320x240`、`RGB565`。摄像头侧使用 3 个 SDRAM video buffer，MIPI/VIN 驱动按 `fifo_in -> active_vbuf -> done_vbuf -> fifo_out` 维护单帧 app buffer 所有权，UVC USB 侧使用 copied-payload `net_buf` 池，当前样例配置为 `CONFIG_USBD_VIDEO_NUM_BUFS=320`。样例通过构建期生成的 project-local Zephyr USB override 修复重复预览路径，不修改 `ZEPHYR_BASE` 上游源码树。
 
 ## 当前验证状态
 
-2026-06-23 在 Titan Board Mini CM85 上完成 `samples/titan_uvc_webcam/` 的真实刷写、主机侧重复采集和 `ffplay` 预览 smoke test。验证范围只覆盖 `320x240`、`RGB565`、UVC bulk/streaming 路径。
+2026-06-23 至 2026-06-24 在 Titan Board Mini CM85 上完成 `samples/titan_uvc_webcam/` 的真实刷写、主机侧重复采集和 `ffplay` 预览 smoke test。验证范围只覆盖 `320x240`、`RGB565`、UVC bulk/streaming 路径。
 
 | 项目 | 结果 |
 |---|---|
@@ -25,6 +25,7 @@
 | 预览 smoke test | `ffplay` 以 `rgb565le` 打开 Titan Board Mini UVC capture 节点并持续收到帧 |
 | 预览后重开 | 退出 `ffplay` 后再次 30 帧采集成功 |
 | 150 帧采集 | 成功输出 `23040000` bytes |
+| MIPI/VIN rearm | 2026-06-24 验证单 active app buffer 所有权重构；source-once 变体在第 2 帧后停止出帧，未保留 |
 
 未验证：自动对焦、不同分辨率、长时间运行、断连重连、WebRTC、`guvcview`、系统相机应用、亮场画质和颜色准确性。部分 host 打开初期可见 V4L2/FFmpeg error/corrupted 标记，但后续帧会恢复为完整 `153600` bytes；这仍是产品化前需要收敛的启动瞬态。当前 USB VID 仍使用 Zephyr 测试默认值 `0x2fe3`，量产前必须替换为正式 VID/PID。
 
@@ -66,7 +67,7 @@
   - 本地 RA8P1 MIPI CSI/VIN video 驱动。
   - 固定输出 `320x240 RGB565`。
   - 初始化 OV5640 MIPI/VIN 相关寄存器。
-  - 处理 VIN frame-complete 回调、cache invalidate/flush、buffer copy 和丢帧计数。
+  - 处理 VIN frame-complete 回调、cache invalidate/flush、单 active app buffer handoff 和丢帧计数。
 
 
 - `samples/titan_uvc_webcam/cmake/titan_zephyr_overrides.cmake`
@@ -234,7 +235,7 @@ ffplay -f v4l2 \
 - MIPI CSI data lanes 是否与硬件连接一致。
 - VIN 输出是否仍按 `RGB565` 解释。
 - Cache invalidate/flush 是否覆盖 DMA/VIN 写入和 UVC 读取边界。
-- 是否有 `dropped_no_app_buf`、`dropped_doneq_full`、`last_ret`、`last_fsp_err` 或 `last_sensor_ret` 异常。
+- 是否有 `dropped_no_app_buf`、`last_ret`、`last_step`、`last_fsp_err` 或 `last_sensor_ret` 异常。
 
 ### 帧率低或卡顿
 
@@ -242,9 +243,9 @@ ffplay -f v4l2 \
 
 - 主机实际选择的帧间隔。
 - `frames` 递增速度。
-- `dropped_no_app_buf` 和 `dropped_doneq_full` 是否递增。
+- `dropped_no_app_buf`、`last_ret`、`last_step` 和 `last_fsp_err`。
 - SDRAM buffer 是否持续复用。
-- 日志和调试读取是否影响采集循环。
+- 日志、J-Link 内存读取和 host `--verbose` 输出是否影响采集循环。
 
 ## 已知限制
 
@@ -254,4 +255,5 @@ ffplay -f v4l2 \
 - `ffplay`/FFmpeg 必须使用 `-input_format rgb565le`；`RGBP` 是 V4L2 fourcc，不是 FFmpeg input format 名。
 - 打开流的前几帧可能出现 V4L2/FFmpeg error/corrupted 标记；后续帧在本次验证中恢复为完整帧。产品化前需要继续收敛。
 - 样例已移除未验证的视频编码器分支；当前只维护 camera 到 UVC 的直接路径。
+- 已尝试 source-once + per-frame VIN rearm；该变体在真实 UVC capture 中只返回两帧后停止出帧，因此当前保留已验证的 OV5640 per-capture start sequence。
 - 系统相机、浏览器 WebRTC、`guvcview`、断连重连、长时间运行、自动对焦和亮场画质仍未验证。

@@ -50,15 +50,15 @@ struct titan_ra_mipi_data {
 	struct video_format fmt;
 	struct k_fifo fifo_in;
 	struct k_fifo fifo_out;
-	struct k_work copy_work;
-	struct k_msgq doneq;
-	void *doneq_buf[TITAN_RA_MIPI_FRAME_COUNT];
+	struct k_work complete_work;
 	const struct device *dev;
+	struct video_buffer *active_vbuf;
+	struct video_buffer *done_vbuf;
+	uint8_t *done_src;
 	atomic_t streaming;
 	atomic_t capture_active;
 	atomic_t frames;
 	atomic_t dropped_no_app_buf;
-	atomic_t dropped_doneq_full;
 	atomic_t start_calls;
 	atomic_t last_step;
 	atomic_t last_ret;
@@ -188,47 +188,70 @@ static void titan_ra_mipi_cache_flush(const void *addr, size_t size)
 
 static int titan_ra_mipi_start_capture(const struct device *dev);
 
-
-static void titan_ra_mipi_copy_work(struct k_work *work)
+static void titan_ra_mipi_abort_buffer(struct titan_ra_mipi_data *data,
+					       struct video_buffer *vbuf)
 {
-	struct titan_ra_mipi_data *data = CONTAINER_OF(work, struct titan_ra_mipi_data, copy_work);
-	uint8_t *src;
-	struct video_buffer *vbuf;
-
-	while (k_msgq_get(&data->doneq, &src, K_NO_WAIT) == 0) {
-
-		vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT);
-		if (vbuf == NULL) {
-			atomic_inc(&data->dropped_no_app_buf);
-			continue;
-		}
-
-		if (vbuf->size < TITAN_RA_MIPI_FRAME_SIZE) {
-			k_fifo_put(&data->fifo_out, vbuf);
-			continue;
-		}
-
-		titan_ra_mipi_cache_invalidate(src, TITAN_RA_MIPI_FRAME_SIZE);
-		if (vbuf->buffer != src) {
-			memcpy(vbuf->buffer, src, TITAN_RA_MIPI_FRAME_SIZE);
-			titan_ra_mipi_cache_flush(vbuf->buffer, TITAN_RA_MIPI_FRAME_SIZE);
-		}
-
-		vbuf->bytesused = TITAN_RA_MIPI_FRAME_SIZE;
-		vbuf->line_offset = 0;
-		vbuf->timestamp = k_uptime_get_32();
-		k_fifo_put(&data->fifo_out, vbuf);
-		atomic_inc(&data->frames);
-
-#ifdef CONFIG_POLL
-		if (data->signal != NULL) {
-			k_poll_signal_raise(data->signal, VIDEO_BUF_DONE);
-		}
-#endif
+	if (vbuf == NULL) {
+		return;
 	}
 
-	if (atomic_get(&data->streaming) && !atomic_get(&data->capture_active) &&
-	    k_fifo_peek_head(&data->fifo_in) != NULL) {
+	vbuf->bytesused = 0;
+	vbuf->line_offset = 0;
+	vbuf->timestamp = k_uptime_get_32();
+	k_fifo_put(&data->fifo_out, vbuf);
+}
+
+static void titan_ra_mipi_complete_work(struct k_work *work)
+{
+	struct titan_ra_mipi_data *data = CONTAINER_OF(work, struct titan_ra_mipi_data,
+						       complete_work);
+	uint8_t *src = data->done_src;
+	struct video_buffer *vbuf = data->done_vbuf;
+
+	data->done_src = NULL;
+	data->done_vbuf = NULL;
+
+	if (vbuf == NULL) {
+		atomic_inc(&data->dropped_no_app_buf);
+		goto rearm;
+	}
+
+	if (src == NULL) {
+		atomic_inc(&data->dropped_no_app_buf);
+		k_fifo_put(&data->fifo_in, vbuf);
+		goto rearm;
+	}
+
+	if (!atomic_get(&data->streaming)) {
+		titan_ra_mipi_abort_buffer(data, vbuf);
+		goto rearm;
+	}
+
+	if (vbuf->size < TITAN_RA_MIPI_FRAME_SIZE) {
+		k_fifo_put(&data->fifo_out, vbuf);
+		goto rearm;
+	}
+
+	titan_ra_mipi_cache_invalidate(src, TITAN_RA_MIPI_FRAME_SIZE);
+	if (vbuf->buffer != src) {
+		memcpy(vbuf->buffer, src, TITAN_RA_MIPI_FRAME_SIZE);
+		titan_ra_mipi_cache_flush(vbuf->buffer, TITAN_RA_MIPI_FRAME_SIZE);
+	}
+
+	vbuf->bytesused = TITAN_RA_MIPI_FRAME_SIZE;
+	vbuf->line_offset = 0;
+	vbuf->timestamp = k_uptime_get_32();
+	k_fifo_put(&data->fifo_out, vbuf);
+	atomic_inc(&data->frames);
+
+#ifdef CONFIG_POLL
+	if (data->signal != NULL) {
+		k_poll_signal_raise(data->signal, VIDEO_BUF_DONE);
+	}
+#endif
+
+rearm:
+	if (atomic_get(&data->streaming) && !atomic_get(&data->capture_active)) {
 		(void)titan_ra_mipi_start_capture(data->dev);
 	}
 }
@@ -238,10 +261,9 @@ static void titan_ra_mipi_vin_callback(capture_callback_args_t *args)
 	const struct device *dev = args->p_context;
 	struct titan_ra_mipi_data *data = dev->data;
 	vin_interrupt_status_t status = {.mask = args->interrupt_status};
-	uint8_t *src = args->p_buffer;
 	fsp_err_t err;
 
-	if (!atomic_get(&data->streaming) || !status.bits.frame_complete || src == NULL) {
+	if (!atomic_get(&data->streaming) || !status.bits.frame_complete) {
 		return;
 	}
 
@@ -251,14 +273,12 @@ static void titan_ra_mipi_vin_callback(capture_callback_args_t *args)
 		atomic_set(&data->last_ret, -EIO);
 		return;
 	}
+
+	data->done_vbuf = data->active_vbuf;
+	data->done_src = args->p_buffer;
+	data->active_vbuf = NULL;
 	atomic_clear(&data->capture_active);
-
-	if (k_msgq_put(&data->doneq, &src, K_NO_WAIT) != 0) {
-		atomic_inc(&data->dropped_doneq_full);
-		return;
-	}
-
-	k_work_submit(&data->copy_work);
+	k_work_submit(&data->complete_work);
 }
 
 static int titan_ra_mipi_get_format(const struct device *dev, struct video_format *fmt)
@@ -324,23 +344,34 @@ static int titan_ra_mipi_start_capture(const struct device *dev)
 		return 0;
 	}
 
-	next_vbuf = k_fifo_peek_head(&data->fifo_in);
-	if (next_vbuf == NULL || next_vbuf->buffer == NULL) {
+	if (data->done_vbuf != NULL) {
+		return 0;
+	}
+
+	next_vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT);
+	if (next_vbuf == NULL) {
 		atomic_set(&data->last_ret, -EAGAIN);
 		return -EAGAIN;
 	}
 
+	if (next_vbuf->buffer == NULL) {
+		k_fifo_put(&data->fifo_in, next_vbuf);
+		atomic_set(&data->last_ret, -EINVAL);
+		return -EINVAL;
+	}
+
 	if (!device_is_ready(config->source_dev)) {
+		k_fifo_put(&data->fifo_in, next_vbuf);
 		atomic_set(&data->last_ret, -ENODEV);
 		return -ENODEV;
 	}
-
 
 	if (!data->vin_ctrl->open) {
 		err = R_VIN_Open(data->vin_ctrl, data->vin_cfg);
 		atomic_set(&data->last_step, 3);
 		atomic_set(&data->last_fsp_err, err);
 		if (err != FSP_SUCCESS) {
+			k_fifo_put(&data->fifo_in, next_vbuf);
 			atomic_set(&data->last_ret, -EIO);
 			LOG_ERR("R_VIN_Open failed: %d", err);
 			return -EIO;
@@ -353,16 +384,24 @@ static int titan_ra_mipi_start_capture(const struct device *dev)
 		atomic_set(&data->last_fsp_err, err);
 		atomic_set(&data->last_ret, -EIO);
 		LOG_ERR("R_VIN_CaptureStart failed: %d", err);
+		(void)R_VIN_CaptureStop(data->vin_ctrl);
+		(void)R_VIN_Close(data->vin_ctrl);
+		k_fifo_put(&data->fifo_in, next_vbuf);
 		return -EIO;
 	}
+
+	data->active_vbuf = next_vbuf;
 	atomic_set(&data->capture_active, 1);
 
 	ret = video_stream_start(config->source_dev, VIDEO_BUF_TYPE_OUTPUT);
 	atomic_set(&data->last_step, 5);
 	if (ret < 0) {
 		atomic_set(&data->last_ret, ret);
-		atomic_clear(&data->capture_active);
+		(void)R_VIN_CaptureStop(data->vin_ctrl);
 		(void)R_VIN_Close(data->vin_ctrl);
+		atomic_clear(&data->capture_active);
+		data->active_vbuf = NULL;
+		k_fifo_put(&data->fifo_in, next_vbuf);
 		return ret;
 	}
 
@@ -370,8 +409,13 @@ static int titan_ra_mipi_start_capture(const struct device *dev)
 	atomic_set(&data->last_step, 6);
 	if (ret < 0) {
 		atomic_set(&data->last_ret, ret);
-		atomic_clear(&data->capture_active);
+		(void)titan_ra_mipi_ov5640_stream_gate(dev, false);
+		(void)R_VIN_CaptureStop(data->vin_ctrl);
 		(void)R_VIN_Close(data->vin_ctrl);
+		(void)video_stream_stop(config->source_dev, VIDEO_BUF_TYPE_OUTPUT);
+		atomic_clear(&data->capture_active);
+		data->active_vbuf = NULL;
+		k_fifo_put(&data->fifo_in, next_vbuf);
 		return ret;
 	}
 
@@ -383,6 +427,8 @@ static int titan_ra_mipi_set_stream(const struct device *dev, bool enable, enum 
 {
 	const struct titan_ra_mipi_config *config = dev->config;
 	struct titan_ra_mipi_data *data = dev->data;
+	struct video_buffer *vbuf;
+	struct k_work_sync sync;
 	int ret;
 	atomic_inc(&data->start_calls);
 	atomic_set(&data->last_step, 1);
@@ -399,8 +445,24 @@ static int titan_ra_mipi_set_stream(const struct device *dev, bool enable, enum 
 		atomic_clear(&data->capture_active);
 		(void)titan_ra_mipi_ov5640_stream_gate(dev, false);
 		(void)video_stream_stop(config->source_dev, type);
+		if (data->active_vbuf != NULL && data->vin_ctrl->open) {
+			(void)R_VIN_CaptureStop(data->vin_ctrl);
+		}
 		if (data->vin_ctrl->open) {
 			(void)R_VIN_Close(data->vin_ctrl);
+		}
+		(void)k_work_cancel_sync(&data->complete_work, &sync);
+		if (data->done_vbuf != NULL) {
+			titan_ra_mipi_abort_buffer(data, data->done_vbuf);
+			data->done_vbuf = NULL;
+			data->done_src = NULL;
+		}
+		if (data->active_vbuf != NULL) {
+			titan_ra_mipi_abort_buffer(data, data->active_vbuf);
+			data->active_vbuf = NULL;
+		}
+		while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT)) != NULL) {
+			titan_ra_mipi_abort_buffer(data, vbuf);
 		}
 		return 0;
 	}
@@ -431,7 +493,8 @@ static int titan_ra_mipi_enqueue(const struct device *dev, struct video_buffer *
 	vbuf->bytesused = TITAN_RA_MIPI_FRAME_SIZE;
 	vbuf->line_offset = 0;
 	k_fifo_put(&data->fifo_in, vbuf);
-	if (atomic_get(&data->streaming) && !atomic_get(&data->capture_active)) {
+	if (atomic_get(&data->streaming) && !atomic_get(&data->capture_active) &&
+	    data->done_vbuf == NULL) {
 		return titan_ra_mipi_start_capture(dev);
 	}
 
@@ -453,12 +516,34 @@ static int titan_ra_mipi_dequeue(const struct device *dev, struct video_buffer *
 
 static int titan_ra_mipi_flush(const struct device *dev, bool cancel)
 {
+	const struct titan_ra_mipi_config *config = dev->config;
 	struct titan_ra_mipi_data *data = dev->data;
 	struct video_buffer *vbuf;
+	struct k_work_sync sync;
 
 	if (cancel) {
+		atomic_clear(&data->streaming);
+		atomic_clear(&data->capture_active);
+		(void)titan_ra_mipi_ov5640_stream_gate(dev, false);
+		(void)video_stream_stop(config->source_dev, VIDEO_BUF_TYPE_OUTPUT);
+		if (data->active_vbuf != NULL && data->vin_ctrl->open) {
+			(void)R_VIN_CaptureStop(data->vin_ctrl);
+		}
+		if (data->vin_ctrl->open) {
+			(void)R_VIN_Close(data->vin_ctrl);
+		}
+		(void)k_work_cancel_sync(&data->complete_work, &sync);
+		if (data->done_vbuf != NULL) {
+			titan_ra_mipi_abort_buffer(data, data->done_vbuf);
+			data->done_vbuf = NULL;
+			data->done_src = NULL;
+		}
+		if (data->active_vbuf != NULL) {
+			titan_ra_mipi_abort_buffer(data, data->active_vbuf);
+			data->active_vbuf = NULL;
+		}
 		while ((vbuf = k_fifo_get(&data->fifo_in, K_NO_WAIT)) != NULL) {
-			k_fifo_put(&data->fifo_out, vbuf);
+			titan_ra_mipi_abort_buffer(data, vbuf);
 		}
 #ifdef CONFIG_POLL
 		if (data->signal != NULL) {
@@ -523,15 +608,15 @@ static int titan_ra_mipi_init(const struct device *dev)
 	config->irq_config_func();
 	k_fifo_init(&data->fifo_in);
 	k_fifo_init(&data->fifo_out);
-	k_work_init(&data->copy_work, titan_ra_mipi_copy_work);
-	k_msgq_init(&data->doneq, (char *)data->doneq_buf, sizeof(void *),
-		    ARRAY_SIZE(data->doneq_buf));
+	k_work_init(&data->complete_work, titan_ra_mipi_complete_work);
 	data->dev = dev;
+	data->active_vbuf = NULL;
+	data->done_vbuf = NULL;
+	data->done_src = NULL;
 	atomic_clear(&data->streaming);
 	atomic_clear(&data->capture_active);
 	atomic_clear(&data->frames);
 	atomic_clear(&data->dropped_no_app_buf);
-	atomic_clear(&data->dropped_doneq_full);
 	atomic_clear(&data->start_calls);
 	atomic_clear(&data->last_step);
 	atomic_clear(&data->last_ret);
